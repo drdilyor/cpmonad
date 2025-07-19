@@ -54,30 +54,27 @@ common warnings
     ghc-options: -Wall
 
 executable cpmonad
-    -- Import common warning flags.
     import:           warnings
-
-    -- .hs or .lhs file containing the Main module.
     main-is:          Main.hs
 
-    -- Modules included in this executable, other than Main.
-    -- other-modules:
+    other-modules:
 
-    -- LANGUAGE extensions used by modules in this package.
-    -- other-extensions:
-
-    -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.18.2.1
+                    , bytestring
+                    , containers
+                    , deepseq
+                    , vector
+                    , vector-algorithms
+                    , random
+                    , optparse-applicative
+                    , free
 
-    -- Directories containing source files.
-    hs-source-dirs:   app
-
-    -- Base language which the package is written in.
+    hs-source-dirs:   src
     default-language: GHC2021
-
     default-extensions:
         BangPatterns
         BinaryLiterals
+        BlockArguments
         ConstraintKinds
         DataKinds
         DefaultSignatures
