@@ -68,6 +68,8 @@ executable cpmonad
                     , random
                     , optparse-applicative
                     , free
+                    , transformers
+                    , mtl
 
     hs-source-dirs:   src
     default-language: GHC2021
