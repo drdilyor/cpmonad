@@ -1,17 +1,23 @@
+{-# LANGUAGE NoFieldSelectors #-}
 {-# OPTIONS_GHC -Wno-type-defaults #-}
-{-# OPTIONS_GHC -Wno-unused-imports #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 module Main where
 
-import Control.Applicative (asum)
-import Control.Monad (forM, forM_, replicateM)
-import Control.Monad.State.Strict
+import Control.Monad (forM, forM_)
+import Data.ByteString.Char8(ByteString)
+import qualified Data.ByteString.Char8 as B
+import qualified Data.ByteString.Builder as B
 import Data.Functor (($>))
 import Data.List
 import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
-import Data.Function (on)
+import Data.Vector.Mutable qualified as VM
+import Lens.Micro
+import Lens.Micro.TH
 import System.Random (uniformR, StdGen, mkStdGen)
 import qualified Data.Vector.Strict
+import Control.Monad.ST
 
 -- AC x  where x must be between 0 and 1
 
@@ -35,7 +41,10 @@ instance Monoid Verdict where
 data Problem i o a = Problem
   { tests :: [(i, a)],
     sols :: [i -> o],
-    check :: i -> a -> o -> Bool
+    check :: i -> a -> o -> Bool,
+    printerI :: Printer i,
+    printerO :: Printer o,
+    printerA :: Printer a
   }
 
 
@@ -62,9 +71,11 @@ runProblem (Problem {..}) = do
       putStrLn $ "  a=" <> show a
 
 newtype Gen a = Gen { runGen :: StdGen -> (a, StdGen) } deriving (Functor)
+runGen :: Gen a -> StdGen -> (a, StdGen)
+runGen (Gen a) = a
 
 instance Applicative Gen where
-  pure x = Gen $ (x,)
+  pure x = Gen (x,)
   Gen h1 <*> Gen h2 = Gen $ \g ->
     let (a1, g1) = h1 g
         (a2, g2) = h2 g1
@@ -101,14 +112,82 @@ instance Indexable Data.Vector.Strict.Vector where
 choose :: Indexable c => c a -> Gen a
 choose xs = let n = size xs in index xs <$> genr 0 n
 
-type Input = Vector Int
+
+data Printer a = Printer
+  { toPrinted :: (a, B.Builder) -> B.Builder,
+    fromPrinted :: (a, ByteString) -> Maybe (a, ByteString)
+  }
+
+instance Semigroup (Printer a) where
+  p1 <> p2 = Printer {..}
+    where
+      toPrinted xb = p1.toPrinted xb <> p2.toPrinted xb
+      fromPrinted xs = p1.fromPrinted xs >>= p2.fromPrinted
+
+
+readInt :: Lens' a Int -> Printer a
+readInt f = Printer {..}
+  where
+    toPrinted (!x, !b) = b <> B.intDec (x ^. f)
+    fromPrinted (!x, !s) = do
+      (n, s') <- B.readInt s
+      pure (x & f .~ n, s')
+
+readChar :: Char -> Printer a
+readChar c = Printer {..}
+  where
+    toPrinted (!_, !b) = b <> B.char8 c
+    fromPrinted (!x, !s) = do
+      c' <- s `B.indexMaybe` 0
+      if c' == c then Just (x, B.tail s) else Nothing
+
+readVecInt :: Lens' a Int -> Lens' a (Vector Int) -> Printer a
+readVecInt n f = Printer {..}
+  where
+    toPrinted (!x, !b) =
+      -- assert $ x ^. n == V.length (x ^. f)
+      if V.length (x ^. f) == 0
+        then b
+        else
+          V.foldl' (\a el -> a <> B.intDec el <> B.char8 ' ') b (V.init (x ^. f))
+            <> B.intDec (V.last $ x ^. f)
+    fromPrinted (!x, !s') =
+      let count = x ^. n
+      in if count == 0 then Just (x & f .~ V.empty, s') else runST do
+        v <- VM.new (x ^. n)
+        let go !s !i
+              | i == count - 1 =
+                case B.readInt s of
+                  Nothing -> pure Nothing
+                  Just (num, s') -> VM.write v i num >> pure (Just s')
+              | otherwise =
+                case B.readInt s of
+                  Nothing -> pure Nothing
+                  Just (num, s') ->
+                    case s' `B.indexMaybe` 0 of
+                      Just ' ' -> VM.write v i num >> go (B.tail s') (i+1)
+                      _ -> pure Nothing
+        res <- go s' 0
+        v' <- V.freeze v
+        pure $ (x & f .~ v',) <$> res
+
+
+data Input = Input { _n :: Int, _arr :: Vector Int } deriving (Show)
 type Output = Maybe Int
 
+makeLenses ''Input
+
+output :: Lens' Output Int
+output = lens
+  (\case Just x -> x
+         Nothing -> -1)
+  (\_ -> \case -1 -> Nothing
+               x -> Just x)
+
 sol1 :: Input -> Output
-sol1 v' =
+sol1 (Input n v') =
   let x1 = V.head v'
       x2 = V.last v'
-      n = V.length v'
       v = V.fromList . sort . V.toList $ v'
       fd l r x =
         if r - l <= 1
@@ -126,7 +205,7 @@ sol1 v' =
    in go x1 0
 
 sol2 :: Input -> Output
-sol2 v' =
+sol2 (Input _ v') =
   let x1 = V.head v'
       x2 = V.last v'
       v = V.fromList . sort . V.toList $ v'
@@ -145,10 +224,10 @@ main :: IO ()
 main = do
   let model = sol1
   let genAll xs = fst $ runGen (sequence xs) (mkStdGen 1)
-      genAll :: [Gen Input] -> [Input]
+      genAll :: [Gen a] -> [a]
   let p =
         Problem
-          { tests = map (\x -> (x, model x)) $ genAll (
+          { tests = map ((\x -> (x, model x)) . (\x -> Input (V.length x) x)) (genAll (
               map (pure . V.fromList)
                 [ [1, 3, 2, 5],
                   [1, 100],
@@ -157,9 +236,12 @@ main = do
               <> replicate 20 (gen1 20 (10^9))
               <> replicate 10 (gen1 20_000 (10^9))
               <> replicate 10 (gen1 20_000 (10^9))
-              ),
+              )),
             sols = [sol1, sol1, sol1, sol2],
-            check = const (==)
+            check = const (==),
+            printerI = readInt n <> readChar '\n' <> readVecInt n arr,
+            printerO = readInt output,
+            printerA = readInt output
           }
   runProblem p
 
