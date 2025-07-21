@@ -172,22 +172,23 @@ readVecInt n f = Printer {..}
         pure $ (x & f .~ v',) <$> res
 
 
-data Input = Input { _n :: Int, _arr :: Vector Int } deriving (Show)
+type Input = Vector Int
 type Output = Maybe Int
 
-makeLenses ''Input
+n :: Lens' Input Int
+n = lens V.length (\_ n -> V.replicate n 0)
+
+arr :: Lens' Input (Vector Int)
+arr = lens id (const id)
 
 output :: Lens' Output Int
-output = lens
-  (\case Just x -> x
-         Nothing -> -1)
-  (\_ -> \case -1 -> Nothing
-               x -> Just x)
+output = non (-1)
 
 sol1 :: Input -> Output
-sol1 (Input n v') =
+sol1 v' =
   let x1 = V.head v'
       x2 = V.last v'
+      n = V.length v'
       v = V.fromList . sort . V.toList $ v'
       fd l r x =
         if r - l <= 1
@@ -205,7 +206,7 @@ sol1 (Input n v') =
    in go x1 0
 
 sol2 :: Input -> Output
-sol2 (Input _ v') =
+sol2 v' =
   let x1 = V.head v'
       x2 = V.last v'
       v = V.fromList . sort . V.toList $ v'
@@ -227,7 +228,7 @@ main = do
       genAll :: [Gen a] -> [a]
   let p =
         Problem
-          { tests = map ((\x -> (x, model x)) . (\x -> Input (V.length x) x)) (genAll (
+          { tests = map (\x -> (x, model x)) (genAll (
               map (pure . V.fromList)
                 [ [1, 3, 2, 5],
                   [1, 100],
@@ -244,4 +245,3 @@ main = do
             printerA = readInt output
           }
   runProblem p
-
