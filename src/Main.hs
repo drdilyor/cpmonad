@@ -95,14 +95,8 @@ runProblem (Problem {..}) = do
 type Input = Vector Int
 type Output = Maybe Int
 
-n :: Lens' Input Int
-n = lens V.length (\_ n -> V.replicate n 0)
-
-arr :: Lens' Input (Vector Int)
-arr = lens id (const id)
-
-output :: Lens' Output Int
-output = non (-1)
+veclen :: Lens' (Vector Int) Int
+veclen = lens V.length (\_ n -> V.replicate n 0)
 
 sortVec :: Ord a => Vector a -> Vector a
 sortVec v' =
@@ -167,9 +161,9 @@ main = do
               )),
             sols = [sol1, sol1, sol1, sol2],
             check = const (==),
-            printerI = readInt n <> readChar '\n' <> readVecInt n arr,
-            printerO = readInt output,
-            printerA = readInt output,
+            printerI = nest veclen readInt <> readChar '\n' <> readVecInt,
+            printerO = nest (non (-1)) readInt,
+            printerA = nest (non (-1)) readInt,
             ei = V.empty, eo = Nothing, ea = Nothing
           }
   runProblem p

@@ -16,6 +16,7 @@ module Cpmonad(
   readVecInt,
   readChar,
   readInt,
+  nest,
 ) where
 
 import Control.Monad.ST
@@ -119,13 +120,13 @@ instance Semigroup (Printer a) where
       fromPrinted xs = p1.fromPrinted xs >>= p2.fromPrinted
 
 
-readInt :: Lens' a Int -> Printer a
-readInt f = Printer {..}
+readInt :: Printer Int
+readInt = Printer {..}
   where
-    toPrinted (!x, !b) = b <> B.intDec (x ^. f)
-    fromPrinted (!x, !s) = do
+    toPrinted (!x, !b) = b <> B.intDec x
+    fromPrinted (!_, !s) = do
       (n, s') <- B.readInt s
-      pure (x & f .~ n, s')
+      pure (n, s')
 
 readChar :: Char -> Printer a
 readChar c = Printer {..}
@@ -135,20 +136,19 @@ readChar c = Printer {..}
       c' <- s `B.indexMaybe` 0
       if c' == c then Just (x, B.tail s) else Nothing
 
-readVecInt :: Lens' a Int -> Lens' a (Vector Int) -> Printer a
-readVecInt n f = Printer {..}
+readVecInt :: Printer (Vector Int)
+readVecInt = Printer {..}
   where
     toPrinted (!x, !b) =
-      -- assert $ x ^. n == V.length (x ^. f)
-      if V.length (x ^. f) == 0
+      if V.length x == 0
         then b
         else
-          V.foldl' (\a el -> a <> B.intDec el <> B.char8 ' ') b (V.init (x ^. f))
-            <> B.intDec (V.last $ x ^. f)
+          V.foldl' (\a el -> a <> B.intDec el <> B.char8 ' ') b (V.init x)
+            <> B.intDec (V.last x)
     fromPrinted (!x, !s') =
-      let count = x ^. n
-      in if count == 0 then Just (x & f .~ V.empty, s') else runST do
-        v <- VM.new (x ^. n)
+      let count = V.length x
+      in if count == 0 then Just (V.empty, s') else runST do
+        v <- VM.new (V.length x)
         let go !s !i
               | i == count - 1 =
                 case B.readInt s of
@@ -163,4 +163,14 @@ readVecInt n f = Printer {..}
                       _ -> pure Nothing
         res <- go s' 0
         v' <- V.freeze v
-        pure $ (x & f .~ v',) <$> res
+        pure $ (v',) <$> res
+
+nest :: Lens' a b -> Printer b -> Printer a
+nest f p = Printer {..}
+  where
+    toPrinted (!a, !builder) = p.toPrinted (a ^. f, builder)
+    fromPrinted (!a, !s) =
+      let x = p.fromPrinted (a ^. f, s)
+       in case x of
+            Just (b, c) -> Just (a & f .~ b, c)
+            Nothing -> Nothing
