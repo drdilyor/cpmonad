@@ -7,21 +7,20 @@ import Control.Exception (catchJust)
 import Control.Monad (forM, forM_, when)
 import Data.ByteString.Builder qualified as B
 import Data.ByteString.Char8 qualified as B
+import Data.Functor (($>))
+import Data.List (foldl1')
 import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
 import Data.Vector.Algorithms.Merge
-
-
 import Lens.Micro
 import System.CPUTime (getCPUTime)
 import System.Directory
 import System.IO
 import System.IO.Error (isDoesNotExistError)
+import System.Random (mkStdGen)
 
 import Cpmonad
-import Data.Functor (($>))
-import System.Random (mkStdGen)
-import Data.List (foldl1')
+import Printer
 
 runProblem :: (Show i, Show o, Show a, NFData a, NFData i, Eq i, Eq a) => Problem i o a -> IO ()
 runProblem (Problem {..}) = do
@@ -95,9 +94,6 @@ runProblem (Problem {..}) = do
 type Input = Vector Int
 type Output = Maybe Int
 
-veclen :: Lens' (Vector Int) Int
-veclen = lens V.length (\_ n -> V.replicate n 0)
-
 sortVec :: Ord a => Vector a -> Vector a
 sortVec v' =
   V.create do
@@ -161,7 +157,7 @@ main = do
               )),
             sols = [sol1, sol1, sol1, sol2],
             check = const (==),
-            printerI = nest veclen readInt <> readChar '\n' <> readVecInt,
+            printerI = nest len readInt <> readChar '\n' <> readVecInt,
             printerO = nest (non (-1)) readInt,
             printerA = nest (non (-1)) readInt,
             ei = V.empty, eo = Nothing, ea = Nothing

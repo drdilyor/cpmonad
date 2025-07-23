@@ -57,7 +57,7 @@ executable cpmonad
     import:           warnings
     main-is:          Main.hs
 
-    other-modules: Cpmonad
+    other-modules: Cpmonad, Printer
 
     build-depends:    base ^>=4.18.2.1
                     , bytestring
@@ -73,6 +73,7 @@ executable cpmonad
                     , microlens
                     , microlens-th
                     , directory
+                    , attoparsec
 
     hs-source-dirs:   src
     default-language: GHC2021
