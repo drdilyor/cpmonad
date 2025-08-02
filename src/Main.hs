@@ -1,5 +1,6 @@
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-type-defaults #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Main where
 
 import Control.DeepSeq (deepseq, NFData)
@@ -13,6 +14,7 @@ import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
 import Data.Vector.Algorithms.Merge
 import Lens.Micro
+import Lens.Micro.TH
 import System.CPUTime (getCPUTime)
 import System.Directory
 import System.IO
@@ -21,8 +23,10 @@ import System.Random (mkStdGen)
 
 import Cpmonad
 import Printer
+import Data.Maybe (fromJust)
+import GHC.Generics (Generic)
 
-runProblem :: (Show i, Show o, Show a, NFData a, NFData i, Eq i, Eq a) => Problem i o a -> IO ()
+runProblem :: (NFData a, NFData i, Eq i, Eq a, Show i) => Problem i o a -> IO ()
 runProblem (Problem {..}) = do
   -- output tests
   catchJust (\e -> if isDoesNotExistError e then Just e else Nothing)
@@ -36,12 +40,12 @@ runProblem (Problem {..}) = do
   forM_ (zip [0 :: Int ..] tests) \(ix, (i, a)) -> do
     h <- openBinaryFile ("tests/" <> show ix <> ".in") WriteMode
     hSetBuffering h (BlockBuffering $ Just 4096)
-    B.hPutBuilder h $ printerI.toPrinted (i, mempty)
+    B.hPutBuilder h . fromJust $ printerI.toPrinted i
     hClose h
 
     h <- openBinaryFile ("tests/" <> show ix <> ".out") WriteMode
     hSetBuffering h (BlockBuffering $ Just 4096)
-    B.hPutBuilder h $ printerA.toPrinted (a, mempty)
+    B.hPutBuilder h . fromJust $ printerA.toPrinted a
     hClose h
   end <- getCPUTime
   let diffms = round $ fromIntegral (end - start) / (10^9)
@@ -54,7 +58,7 @@ runProblem (Problem {..}) = do
     let i = fst <$> printerI.fromPrinted (ei, s)
     s <- B.readFile ("tests/" <> show ix <> ".out")
     let a = fst <$> printerA.fromPrinted (ea, s)
-    last (show i) `deepseq` last (show a) `deepseq` pure ()
+    i `deepseq` a `deepseq` pure ()
   end <- getCPUTime
   let diffms = round $ fromIntegral (end - start) / (10^9)
   putStrLn $ "took " <> show diffms <> "ms"
@@ -62,8 +66,8 @@ runProblem (Problem {..}) = do
   putStr "transcoding tests ... "
   start <- getCPUTime
   forM_ (zip [0 :: Int ..] tests) \(_, (i, a)) -> do
-    let i' = fmap fst . printerI.fromPrinted . (ei,) . B.toStrict . B.toLazyByteString $ printerI.toPrinted (i, mempty)
-    let a' = fmap fst . printerA.fromPrinted . (ea,) . B.toStrict . B.toLazyByteString $ printerA.toPrinted (a, mempty)
+    let i' = fmap fst . printerI.fromPrinted . (ei,) . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i
+    let a' = fmap fst . printerA.fromPrinted . (ea,) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted a
     when (i' /= Just i) $ putStrLn "input didn't match!!!"
     when (a' /= Just a) $ putStrLn "aux didn't match!!!"
   end <- getCPUTime
@@ -87,12 +91,14 @@ runProblem (Problem {..}) = do
       putStrLn $ "sol " <> show ix <> ": AC " <> show (round (x * 100) :: Int) <> "%"
     (ix, (_, (i, a, o))) -> do
       putStrLn $ "sol " <> show ix <> ": WA:"
-      putStrLn $ "  i=" <> show i
-      putStrLn $ "  o=" <> show o
-      putStrLn $ "  a=" <> show a
+      B.putStrLn $ ">>> input:\n" <> (B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i) <> "\n"
+      B.putStrLn $ ">>> output:\n" <> (B.toStrict . B.toLazyByteString . fromJust $ printerO.toPrinted o) <> "\n"
+      B.putStrLn $ ">>> test output:\n" <> (B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted a) <> "\n"
 
-type Input = Vector Int
+data Input = Input { _n :: Int, _arr :: Vector Int } deriving (Show, Eq, Generic, NFData)
 type Output = Maybe Int
+
+makeLenses ''Input
 
 sortVec :: Ord a => Vector a -> Vector a
 sortVec v' =
@@ -102,7 +108,7 @@ sortVec v' =
     pure v
 
 sol1 :: Input -> Output
-sol1 v' =
+sol1 (Input _ v') =
   let x1 = V.head v'
       x2 = V.last v'
       n = V.length v'
@@ -123,20 +129,20 @@ sol1 v' =
    in go x1 0
 
 sol2 :: Input -> Output
-sol2 v' =
+sol2 (Input _ v') =
   let x1 = V.head v'
       x2 = V.last v'
       v = sortVec v'
   in liftA2 (-) (V.findIndex (== x2) v) (V.findIndexR (== x1) v)
 
-gen1 :: Int -> Int -> Gen (Vector Int)
-gen1 n m = V.replicateM n (genr 0 m)
+gen1 :: Int -> Int -> Gen Input
+gen1 n m = Input n <$> V.replicateM n (genr 0 m)
 
-gen2 :: Int -> Int -> Gen (Vector Int)
+gen2 :: Int -> Int -> Gen Input
 gen2 n x = do
   a <- genr 0 x
   b <- genr (a*2+1) (x*2+1)
-  pure $ V.replicate (n-1) a `V.snoc` b
+  pure $ Input n $ V.replicate (n-1) a `V.snoc` b
 
 main :: IO ()
 main = do
@@ -146,7 +152,7 @@ main = do
   let p =
         Problem
           { tests = map (\x -> (x, model x)) (genAll (
-              map (pure . V.fromList)
+              map (\v -> pure . Input (length v) $ V.fromList v)
                 [ [1, 3, 2, 5],
                   [1, 100],
                   [298077099, 766294630, 440423914, 59187620, 725560241, 585990757, 965580536, 623321126, 550925214, 917827435]
@@ -157,9 +163,9 @@ main = do
               )),
             sols = [sol1, sol1, sol1, sol2],
             check = const (==),
-            printerI = nest len readInt <> readChar '\n' <> readVecInt,
-            printerO = nest (non (-1)) readInt,
-            printerA = nest (non (-1)) readInt,
-            ei = V.empty, eo = Nothing, ea = Nothing
+            printerI = pint n <> endl <> pvec ' ' n arr 0 (pint idl),
+            printerO = pint (non (-1)),
+            printerA = pint (non (-1)),
+            ei = Input 0 V.empty, eo = Nothing, ea = Nothing
           }
   runProblem p
