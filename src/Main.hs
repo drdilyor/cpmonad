@@ -23,7 +23,7 @@ import System.Random (mkStdGen)
 
 import Cpmonad
 import Printer
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, fromMaybe)
 import GHC.Generics (Generic)
 import System.Timeout (timeout)
 import Control.Exception.Base (evaluate)
@@ -47,7 +47,7 @@ runProblem (Problem {..}) = do
 
     h <- openBinaryFile ("tests/" <> show ix <> ".out") WriteMode
     hSetBuffering h (BlockBuffering $ Just 4096)
-    B.hPutBuilder h . fromJust $ printerA.toPrinted a
+    B.hPutBuilder h . fromJust $ printerA.toPrinted (i, a)
     hClose h
   end <- getCPUTime
   let diffms = round $ fromIntegral (end - start) / (10^9)
@@ -57,9 +57,9 @@ runProblem (Problem {..}) = do
   start <- getCPUTime
   forM_ (zip [0 :: Int ..] tests) \(ix, _) -> do
     s <- B.readFile ("tests/" <> show ix <> ".in")
-    let i = fst <$> printerI.fromPrinted (ei, s)
+    let i = fst . fromJust $ printerI.fromPrinted (ei, s)
     s <- B.readFile ("tests/" <> show ix <> ".out")
-    let a = fst <$> printerA.fromPrinted (ea, s)
+    let a = fst <$> printerA.fromPrinted ((i, ea), s)
     -- putStrLn $ "test " <> show ix
     -- putStrLn $ "  " <> show (tests !! ix)
     -- hFlush stdout
@@ -72,7 +72,8 @@ runProblem (Problem {..}) = do
   start <- getCPUTime
   forM_ (zip [0 :: Int ..] tests) \(_, (i, a)) -> do
     let i' = fmap fst . printerI.fromPrinted . (ei,) . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i
-    let a' = fmap fst . printerA.fromPrinted . (ea,) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted a
+    let a' = do i <- i'
+                fmap (snd . fst) . printerA.fromPrinted . ((i, ea),) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)
     when (i' /= Just i) $ putStrLn "input didn't match!!!"
     when (a' /= Just a) $ putStrLn "aux didn't match!!!"
   end <- getCPUTime
@@ -99,8 +100,8 @@ runProblem (Problem {..}) = do
     (ix, (_, (i, a, o))) -> do
       putStrLn $ "sol " <> show ix <> ": WA:"
       B.putStrLn $ ">>> input:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i) <> "\n"
-      B.putStrLn $ ">>> output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerO.toPrinted o) <> "\n"
-      B.putStrLn $ ">>> test output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted a) <> "\n"
+      B.putStrLn $ ">>> output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromMaybe "" $ printerO.toPrinted (i, o)) <> "\n"
+      B.putStrLn $ ">>> test output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)) <> "\n"
 
 data Input = Input
   { _n :: Int,
@@ -110,7 +111,7 @@ data Input = Input
   }
   deriving (Show, Eq, Generic, NFData)
 
-type Output = (Int, Vector Int)
+type Output = Vector Int
 
 makeLenses ''Input
 
@@ -119,13 +120,13 @@ sol1 (Input _ arr _ queries) =
   let pref = V.scanl' (+) 0 arr
       ans = flip V.map queries \(l, r) ->
         pref ! (r + 1) - pref ! l
-   in (V.length ans, ans)
+   in ans
 
 sol2 :: Input -> Output
 sol2 (Input _ arr _ queries) =
   let ans = flip V.map queries \(l, r) ->
         V.sum (V.slice l (r - l + 1) arr)
-   in (V.length ans, ans)
+   in ans
 
 gen1 :: Int -> Int -> Gen Input
 gen1 n q =
@@ -167,10 +168,10 @@ p =
       printerI = pint n <> endl
                 <> pvec ' ' n arr 0 (pint idl) <> endl
                 <> pint q <> endl
-                <> pvec ' ' q queries (0,0) (pint _1 <> sp <> pint _2),
-      printerO = pint _1 <> endl <> pvecint ' ' _1 _2,
-      printerA = pint _1 <> endl <> pvecint ' ' _1 _2,
-      ei = Input 0 V.empty 0 V.empty, eo = (0, V.empty), ea = (0, V.empty)
+                <> pvec '\n' q queries (0,0) (pint _1 <> sp <> pint _2),
+      printerO = pvecint '\n' (_1 . q) _2,
+      printerA = pvecint '\n' (_1 . q) _2,
+      ei = Input 0 V.empty 0 V.empty, eo = V.empty, ea = V.empty
     }
 
 main :: IO ()

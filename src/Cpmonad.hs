@@ -44,8 +44,8 @@ data Problem i o a = Problem
     sols :: [i -> o],
     check :: i -> a -> o -> Bool,
     printerI :: Printer i,
-    printerO :: Printer o,
-    printerA :: Printer a,
+    printerO :: Printer (i, o),
+    printerA :: Printer (i, a),
     ei :: i, eo :: o, ea :: a
   }
 
