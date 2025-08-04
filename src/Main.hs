@@ -3,7 +3,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Main where
 
-import Control.DeepSeq (deepseq, NFData)
+import Control.DeepSeq (deepseq, force, NFData)
 import Control.Exception (catchJust)
 import Control.Monad (forM, forM_, when)
 import Data.ByteString.Builder qualified as B
@@ -25,8 +25,10 @@ import Cpmonad
 import Printer
 import Data.Maybe (fromJust)
 import GHC.Generics (Generic)
+import System.Timeout (timeout)
+import Control.Exception.Base (evaluate)
 
-runProblem :: (NFData a, NFData i, Eq i, Eq a, Show i) => Problem i o a -> IO ()
+runProblem :: (NFData a, NFData i, Eq i, Eq a, Show i, Show a, NFData o) => Problem i o a -> IO ()
 runProblem (Problem {..}) = do
   -- output tests
   catchJust (\e -> if isDoesNotExistError e then Just e else Nothing)
@@ -58,6 +60,9 @@ runProblem (Problem {..}) = do
     let i = fst <$> printerI.fromPrinted (ei, s)
     s <- B.readFile ("tests/" <> show ix <> ".out")
     let a = fst <$> printerA.fromPrinted (ea, s)
+    -- putStrLn $ "test " <> show ix
+    -- putStrLn $ "  " <> show (tests !! ix)
+    -- hFlush stdout
     i `deepseq` a `deepseq` pure ()
   end <- getCPUTime
   let diffms = round $ fromIntegral (end - start) / (10^9)
@@ -79,10 +84,12 @@ runProblem (Problem {..}) = do
     forM (zip [0 :: Int ..] sols) \(ix, f) -> do
       putStr $ "sol " <> show ix <> ": "
       verdict <- foldl1' mergeVerdict' <$> forM tests \(i, a) -> do
-        let o = f i
-        if check i a o
-          then putStr "." $> (AC 1, (i, a, o))
-          else putStr "X" $> (WA, (i, a, o))
+        o' <- timeout 100_000 (evaluate . force $ f i)
+        case o' of
+          Nothing -> putStr "T" $> (TLE, (i, a, eo))
+          Just o -> if check i a o
+            then putStr "." $> (AC 1, (i, a, o))
+            else putStr "X" $> (WA, (i, a, o))
       putStrLn ""
       pure verdict
 
@@ -91,81 +98,80 @@ runProblem (Problem {..}) = do
       putStrLn $ "sol " <> show ix <> ": AC " <> show (round (x * 100) :: Int) <> "%"
     (ix, (_, (i, a, o))) -> do
       putStrLn $ "sol " <> show ix <> ": WA:"
-      B.putStrLn $ ">>> input:\n" <> (B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i) <> "\n"
-      B.putStrLn $ ">>> output:\n" <> (B.toStrict . B.toLazyByteString . fromJust $ printerO.toPrinted o) <> "\n"
-      B.putStrLn $ ">>> test output:\n" <> (B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted a) <> "\n"
+      B.putStrLn $ ">>> input:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i) <> "\n"
+      B.putStrLn $ ">>> output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerO.toPrinted o) <> "\n"
+      B.putStrLn $ ">>> test output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted a) <> "\n"
 
-data Input = Input { _n :: Int, _arr :: Vector Int } deriving (Show, Eq, Generic, NFData)
-type Output = Maybe Int
+data Input = Input
+  { _n :: Int,
+    _arr :: Vector Int,
+    _q :: Int,
+    _queries :: Vector (Int, Int)
+  }
+  deriving (Show, Eq, Generic, NFData)
+
+type Output = (Int, Vector Int)
 
 makeLenses ''Input
 
-sortVec :: Ord a => Vector a -> Vector a
-sortVec v' =
-  V.create do
-    v <- V.thaw v'
-    sort v
-    pure v
-
 sol1 :: Input -> Output
-sol1 (Input _ v') =
-  let x1 = V.head v'
-      x2 = V.last v'
-      n = V.length v'
-      v = sortVec v'
-      fd l r x =
-        if r - l <= 1
-          then l
-          else
-            let mid = (l + r) `div` 2
-             in if v ! mid <= x then fd mid r x else fd l mid x
-
-      go x s | x >= x2 = Just s
-      go x s =
-        let x' = fd (-1) n (x * 2)
-         in if x' == -1 || x' == x
-              then Nothing
-              else go x' (s + 1)
-   in go x1 0
+sol1 (Input _ arr _ queries) =
+  let pref = V.scanl' (+) 0 arr
+      ans = flip V.map queries \(l, r) ->
+        pref ! (r + 1) - pref ! l
+   in (V.length ans, ans)
 
 sol2 :: Input -> Output
-sol2 (Input _ v') =
-  let x1 = V.head v'
-      x2 = V.last v'
-      v = sortVec v'
-  in liftA2 (-) (V.findIndex (== x2) v) (V.findIndexR (== x1) v)
+sol2 (Input _ arr _ queries) =
+  let ans = flip V.map queries \(l, r) ->
+        V.sum (V.slice l (r - l + 1) arr)
+   in (V.length ans, ans)
 
 gen1 :: Int -> Int -> Gen Input
-gen1 n m = Input n <$> V.replicateM n (genr 0 m)
+gen1 n q =
+  Input n
+    <$> V.replicateM n (genr 0 (10^9))
+    <*> pure q
+    <*> V.replicateM q do
+      l <- genr 0 n
+      r <- genr 0 n
+      if l <= r
+      then pure (l, r)
+      else pure (r, l)
 
 gen2 :: Int -> Int -> Gen Input
-gen2 n x = do
-  a <- genr 0 x
-  b <- genr (a*2+1) (x*2+1)
-  pure $ Input n $ V.replicate (n-1) a `V.snoc` b
+gen2 = gen1
+
+model :: Input -> Output
+model = sol1
+
+genAll xs = fst $ runGen (sequence xs) (mkStdGen 1)
+genAll :: [Gen a] -> [a]
+
+p :: Problem Input Output Output
+p =
+  Problem
+    { tests = map (\x -> (x, model x)) (genAll (
+        map (\(v, u) -> pure $ Input (length v) (V.fromList v) (length u) (V.fromList u))
+          [ ([1, 3, 2, 5],[(0,1)]),
+            ([1, 3, 2, 5],[(0,2)]),
+            ([1, 3, 2, 5],[(0,3)])
+          ]
+        <> replicate 1 (gen1 20 20)
+        <> replicate 1 (gen1 2000 2000)
+        <> replicate 1 (gen1 20000 20000)
+        <> replicate 1 (gen1 200000 200000)
+        )),
+      sols = [sol1, sol1, sol1, sol2],
+      check = const (==),
+      printerI = pint n <> endl
+                <> pvec ' ' n arr 0 (pint idl) <> endl
+                <> pint q <> endl
+                <> pvec ' ' q queries (0,0) (pint _1 <> sp <> pint _2),
+      printerO = pint _1 <> endl <> pvecint ' ' _1 _2,
+      printerA = pint _1 <> endl <> pvecint ' ' _1 _2,
+      ei = Input 0 V.empty 0 V.empty, eo = (0, V.empty), ea = (0, V.empty)
+    }
 
 main :: IO ()
-main = do
-  let model = sol1
-  let genAll xs = fst $ runGen (sequence xs) (mkStdGen 1)
-      genAll :: [Gen a] -> [a]
-  let p =
-        Problem
-          { tests = map (\x -> (x, model x)) (genAll (
-              map (\v -> pure . Input (length v) $ V.fromList v)
-                [ [1, 3, 2, 5],
-                  [1, 100],
-                  [298077099, 766294630, 440423914, 59187620, 725560241, 585990757, 965580536, 623321126, 550925214, 917827435]
-                ]
-              <> replicate 20 (gen1 20 (10^9))
-              <> replicate 10 (gen1 20_000 (10^9))
-              <> replicate 10 (gen1 200_000 (10^9))
-              )),
-            sols = [sol1, sol1, sol1, sol2],
-            check = const (==),
-            printerI = pint n <> endl <> pvec ' ' n arr 0 (pint idl),
-            printerO = pint (non (-1)),
-            printerA = pint (non (-1)),
-            ei = Input 0 V.empty, eo = Nothing, ea = Nothing
-          }
-  runProblem p
+main = runProblem p
