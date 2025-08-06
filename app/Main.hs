@@ -166,11 +166,11 @@ p =
       sols = [sol1, sol1, sol1, sol2],
       check = const (==),
       printerI = pint n <> endl
-                <> pvec ' ' n arr 0 (pint idl) <> endl
+                <> pvec sp n arr 0 (pint idl) <> endl
                 <> pint q <> endl
-                <> pvec '\n' q queries (0,0) (pint _1 <> sp <> pint _2),
-      printerO = pvecint '\n' (_1 . q) _2,
-      printerA = pvecint '\n' (_1 . q) _2,
+                <> pvec endl q queries (0,0) (pint _1 <> sp <> pint _2),
+      printerO = pvecint sp (_1 . q) _2,
+      printerA = pvecint endl (_1 . q) _2,
       ei = Input 0 V.empty 0 V.empty, eo = V.empty, ea = V.empty
     }
 

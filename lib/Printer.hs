@@ -78,16 +78,15 @@ pint = nest Printer {..}
       pure (n, s')
 
 
-pvec :: Char -> SimpleGetter a Int -> Lens' a (Vector b) -> b -> Printer b -> Printer a
-pvec sep _ _ _ _ | sep /= ' ' && sep /= '\n' = error "separator must be whitespace"
-pvec sep n arr e (Printer toPrinted' fromPrinted') = Printer {..}
+pvec :: (forall c. Printer c) -> SimpleGetter a Int -> Lens' a (Vector b) -> b -> Printer b -> Printer a
+pvec sep n arr e p = Printer {..}
   where
     toPrinted !x
       | x ^. n /= V.length (x ^. arr) = Nothing
       | x ^. n == 0 = Just mempty
       | otherwise =
-          toPrinted' (V.head (x ^. arr))
-          <> mconcat [Just (B.char8 sep) <> toPrinted' el | el <- V.toList . V.tail $ x ^. arr]
+          p.toPrinted (V.head (x ^. arr))
+          <> mconcat [sep.toPrinted () <> p.toPrinted el | el <- V.toList . V.tail $ x ^. arr]
     fromPrinted (!x, !s') =
       let count = x ^. n
        in if count == 0
@@ -97,35 +96,18 @@ pvec sep n arr e (Printer toPrinted' fromPrinted') = Printer {..}
               let go !s !i
                     | i == count = pure (Just s)
                     | otherwise =
-                        case fromPrinted' (e, s)  of
+                        case sep.fromPrinted ((), s) of
                           Nothing -> pure Nothing
-                          Just (val, s'') -> VM.write v i val >> go s'' (i + 1)
+                          Just (_, s2) ->
+                            case p.fromPrinted (e, s2)  of
+                              Nothing -> pure Nothing
+                              Just (val, s3) -> VM.write v i val >> go s3 (i + 1)
               res <- go s' 0
               v' <- V.freeze v
               pure $ (x & arr .~ v',) <$> res
 
-pvecint :: Char -> SimpleGetter a Int -> Lens' a (V.Vector Int) -> Printer a
-pvecint sep n arr = Printer {..}
-  where
-    toPrinted !x
-      | x ^. n /= V.length (x ^. arr) = Nothing
-      | x ^. n == 0 = Just mempty
-      | otherwise = Just $ B.intDec (V.head (x ^. arr)) <> mconcat [B.char8 sep <> B.intDec el | el <- V.toList . V.tail $ x ^. arr]
-    fromPrinted (!x, !s') =
-      let count = x ^. n
-       in if count == 0
-            then Just (x & arr .~ V.empty, s')
-            else runST do
-              v <- VM.new count
-              let go !s !i
-                    | i == count = pure (Just s)
-                    | otherwise =
-                        case B.readInt (skipSpace s) of
-                          Nothing -> pure Nothing
-                          Just (num, s'') -> VM.write v i num >> go s'' (i + 1)
-              res <- go s' 0
-              v' <- V.freeze v
-              pure $ (x & arr .~ v',) <$> res
+pvecint :: (forall b. Printer b) -> SimpleGetter a Int -> Lens' a (V.Vector Int) -> Printer a
+pvecint sep n arr = pvec sep n arr 0 (pint id)
 
 pvecvecint :: SimpleGetter a Int -> SimpleGetter a Int -> Lens' a (Vector (Vector Int)) -> Printer a
 pvecvecint n m arr = Printer {..}
@@ -133,10 +115,10 @@ pvecvecint n m arr = Printer {..}
     toPrinted !x
       | x ^. n /= V.length (x ^. arr) = Nothing
       | otherwise =
-            let vec i = (pvecint ' ' _1 _2).toPrinted (x ^. m, (x ^. arr) ! i)
+            let vec i = (pvecint sp _1 _2).toPrinted (x ^. m, (x ^. arr) ! i)
              in mconcat [vec i <> Just (B.char8 '\n') | i <- [0 .. x ^. n - 1]]
     fromPrinted (!x, !s') =
-      let vec s i = (pvecint ' ' _1 _2).fromPrinted ((x ^. m, (x ^. arr) ! i), s)
+      let vec s i = (pvecint sp _1 _2).fromPrinted ((x ^. m, (x ^. arr) ! i), s)
        in runST do
             let count = x ^. n
             v <- VM.new count
