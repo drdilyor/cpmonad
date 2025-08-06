@@ -9,7 +9,7 @@
     {
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
-          (haskellPackages.ghcWithPackages (pkgs: with pkgs; [ cabal-install ]))
+          (haskellPackages.ghcWithPackages (pkgs: with pkgs; [ cabal-install hspec-discover ]))
           ghcid
           haskell-language-server
         ];

@@ -93,13 +93,16 @@ executable exe
 
 test-suite test
     import: ghc, dependencies
+    ghc-options: -Wno-missing-signatures
     type: exitcode-stdio-1.0
     main-is: Spec.hs
+    other-modules: PrinterSpec
 
     build-depends:
           cpmonad
         , hspec
         , hspec-contrib
+        , hspec-discover
         , QuickCheck
         , HUnit
 
