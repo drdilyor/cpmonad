@@ -11,13 +11,30 @@ module Cpmonad(
   genri,
   Indexable(..),
   choose,
+  genpair,
+  distribute,
+  shuffle,
+  genperm,
+  gendistinct,
+
+  vsort,
+  vinverse,
 ) where
 
+import Data.Set qualified as Set
 import Data.List
+import Data.Vector (Vector)
 import Data.Vector qualified as V
+import Data.Vector.Mutable qualified as VM
 import Data.Vector.Strict qualified
+import Data.Vector.Algorithms.Merge qualified as VA
 import System.Random (uniformR, StdGen)
 import Printer
+import Control.Monad.State.Strict (StateT (..), state, lift)
+import Control.Monad.Identity (Identity)
+import Control.Monad.ST
+import Control.Monad (forM_)
+import Data.STRef
 
 -- [[[ Basics ]]]
 -- AC x  where x must be between 0 and 1
@@ -51,28 +68,15 @@ data Problem i o a = Problem
 
 -- [[[ Data generation ]]]
 
-newtype Gen a = Gen { runGen :: StdGen -> (a, StdGen) } deriving (Functor)
+type Gen s = StateT StdGen (ST s)
 
-runGen :: Gen a -> StdGen -> (a, StdGen)
-runGen (Gen a) = a
+runGen :: (forall s. Gen s a) -> StdGen -> (a, StdGen)
+runGen g s = runST $ runStateT g s
 
-instance Applicative Gen where
-  pure x = Gen (x,)
-  Gen h1 <*> Gen h2 = Gen $ \g ->
-    let (a1, g1) = h1 g
-        (a2, g2) = h2 g1
-     in (a1 a2, g2)
+genr :: Int -> Int -> Gen s Int
+genr a b = state $ uniformR (a, b-1)
 
-instance Monad Gen where
-  Gen h1 >>= next = Gen $ \g ->
-    let (a1, g1) = h1 g
-        (a2, g2) = runGen (next a1) g1
-     in (a2, g2)
-
-genr :: Int -> Int -> Gen Int
-genr a b = Gen $ uniformR (a, b-1)
-
-genri :: Int -> Int -> Gen Int
+genri :: Int -> Int -> Gen s Int
 genri a b = genr a (b-1)
 
 class Indexable c where
@@ -91,5 +95,62 @@ instance Indexable Data.Vector.Strict.Vector where
   index = (Data.Vector.Strict.!)
   size = Data.Vector.Strict.length
 
-choose :: Indexable c => c a -> Gen a
+choose :: Indexable c => c a -> Gen s a
 choose xs = let n = size xs in index xs <$> genr 0 n
+
+genuntil :: (a -> Bool) -> Gen s a -> Gen s a
+genuntil p g = do
+  x <- g
+  if p x
+    then pure x
+    else genuntil p g
+
+genpair :: (Int -> Int -> Bool) -> Gen s Int -> Gen s (Int, Int)
+genpair f g = genuntil (uncurry f) $ liftA2 (,) g g
+
+distribute :: Int -> Int -> Int -> Gen s (Vector Int)
+distribute _ _ low | low < 0 = error "low must be non-negative"
+distribute _ n _ | n <= 0 = error "n must be positive"
+distribute s n 0 = do
+  v <- VM.replicateM (n - 1) $ genr 0 s
+  VA.sort v
+  v' <- V.unsafeFreeze v
+  let delimeters = V.singleton 0 <> v' <> V.singleton s
+  pure $ V.zipWith (-) (V.drop 1 delimeters) delimeters
+distribute s n low = V.map (+ low) <$> distribute (s - low * n) n 0
+
+shuffle' :: VM.STVector s Int -> Gen s (Vector Int)
+shuffle' v = do
+  let n = VM.length v
+  forM_ [0 .. n - 1] \i -> do
+    j <- genr i n
+    x <- VM.read v i
+    VM.write v j x
+  V.unsafeFreeze v
+
+shuffle :: Vector Int -> Gen s (Vector Int)
+shuffle v = shuffle' =<< V.thaw v
+
+genperm :: Int -> Gen s (Vector Int)
+genperm n = shuffle' =<< V.unsafeThaw (V.enumFromN 0 n)
+
+gendistinct :: (Ord a) => Int -> Gen s a -> Gen s (Vector a)
+gendistinct n g = VM.new n >>= go 0 Set.empty
+  where
+    go i seen v =
+      if i == n
+        then V.unsafeFreeze v
+        else do
+          x <- genuntil (not . flip Set.member seen) g
+          VM.write v i x
+          go (i + 1) (Set.insert x seen) v
+
+-- Utility functions
+vsort :: Vector Int -> Vector Int
+vsort v' = V.create do
+  v <- V.unsafeThaw v'
+  VA.sort v
+  pure v
+
+vinverse :: Vector Int -> Vector Int
+vinverse p = V.update_ p p (V.enumFromN 0 $ V.length p)

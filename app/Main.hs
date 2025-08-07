@@ -128,7 +128,7 @@ sol2 (Input _ arr _ queries) =
         V.sum (V.slice l (r - l + 1) arr)
    in ans
 
-gen1 :: Int -> Int -> Gen Input
+gen1 :: Int -> Int -> Gen s Input
 gen1 n q =
   Input n
     <$> V.replicateM n (genr 0 (10^9))
@@ -140,14 +140,14 @@ gen1 n q =
       then pure (l, r)
       else pure (r, l)
 
-gen2 :: Int -> Int -> Gen Input
+gen2 :: Int -> Int -> Gen s Input
 gen2 = gen1
 
 model :: Input -> Output
 model = sol1
 
+genAll :: forall a. (forall s. [Gen s a]) -> [a]
 genAll xs = fst $ runGen (sequence xs) (mkStdGen 1)
-genAll :: [Gen a] -> [a]
 
 p :: Problem Input Output Output
 p =
