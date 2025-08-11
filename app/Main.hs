@@ -8,11 +8,11 @@ import Control.Exception (catchJust)
 import Control.Monad (forM, forM_, when)
 import Data.ByteString.Builder qualified as B
 import Data.ByteString.Char8 qualified as B
+import Data.Default
 import Data.Functor (($>))
 import Data.List (foldl1')
 import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
-import Data.Vector.Algorithms.Merge
 import Lens.Micro
 import Lens.Micro.TH
 import System.CPUTime (getCPUTime)
@@ -28,7 +28,7 @@ import GHC.Generics (Generic)
 import System.Timeout (timeout)
 import Control.Exception.Base (evaluate)
 
-runProblem :: (NFData a, NFData i, Eq i, Eq a, Show i, Show a, NFData o) => Problem i o a -> IO ()
+runProblem :: (NFData a, NFData i, Eq i, Eq a, Show i, Show a, NFData o, Default o, Default i, Default a) => Problem i o a -> IO ()
 runProblem (Problem {..}) = do
   -- output tests
   catchJust (\e -> if isDoesNotExistError e then Just e else Nothing)
@@ -57,9 +57,9 @@ runProblem (Problem {..}) = do
   start <- getCPUTime
   forM_ (zip [0 :: Int ..] tests) \(ix, _) -> do
     s <- B.readFile ("tests/" <> show ix <> ".in")
-    let i = fst . fromJust $ printerI.fromPrinted (ei, s)
+    let i = fst . fromJust $ printerI.fromPrinted (def, s)
     s <- B.readFile ("tests/" <> show ix <> ".out")
-    let a = fst <$> printerA.fromPrinted ((i, ea), s)
+    let a = fst <$> printerA.fromPrinted ((i, def), s)
     -- putStrLn $ "test " <> show ix
     -- putStrLn $ "  " <> show (tests !! ix)
     -- hFlush stdout
@@ -71,9 +71,9 @@ runProblem (Problem {..}) = do
   putStr "transcoding tests ... "
   start <- getCPUTime
   forM_ (zip [0 :: Int ..] tests) \(_, (i, a)) -> do
-    let i' = fmap fst . printerI.fromPrinted . (ei,) . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i
+    let i' = fmap fst . printerI.fromPrinted . (def,) . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i
     let a' = do i <- i'
-                fmap (snd . fst) . printerA.fromPrinted . ((i, ea),) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)
+                fmap (snd . fst) . printerA.fromPrinted . ((i, def),) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)
     when (i' /= Just i) $ putStrLn "input didn't match!!!"
     when (a' /= Just a) $ putStrLn "aux didn't match!!!"
   end <- getCPUTime
@@ -87,7 +87,7 @@ runProblem (Problem {..}) = do
       verdict <- foldl1' mergeVerdict' <$> forM tests \(i, a) -> do
         o' <- timeout 100_000 (evaluate . force $ f i)
         case o' of
-          Nothing -> putStr "T" $> (TLE, (i, a, eo))
+          Nothing -> putStr "T" $> (TLE, (i, a, def))
           Just o -> if check i a o
             then putStr "." $> (AC 1, (i, a, o))
             else putStr "X" $> (WA, (i, a, o))
@@ -110,6 +110,8 @@ data Input = Input
     _queries :: Vector (Int, Int)
   }
   deriving (Show, Eq, Generic, NFData)
+
+instance Default Input where
 
 type Output = Vector Int
 
@@ -170,8 +172,7 @@ p =
                 <> pint q <> endl
                 <> pvec endl q queries (0,0) (pint _1 <> sp <> pint _2),
       printerO = pvecint sp (_1 . q) _2,
-      printerA = pvecint endl (_1 . q) _2,
-      ei = Input 0 V.empty 0 V.empty, eo = V.empty, ea = V.empty
+      printerA = pvecint endl (_1 . q) _2
     }
 
 main :: IO ()

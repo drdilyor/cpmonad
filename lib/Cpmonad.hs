@@ -21,12 +21,13 @@ module Cpmonad(
   vinverse,
 ) where
 
+import Data.Default
 import Data.Set qualified as Set
 import Data.List
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as VM
-import Data.Vector.Strict qualified
+import Data.Vector.Strict qualified as VS
 import Data.Vector.Algorithms.Merge qualified as VA
 import System.Random (uniformR, StdGen)
 import Printer
@@ -62,8 +63,7 @@ data Problem i o a = Problem
     check :: i -> a -> o -> Bool,
     printerI :: Printer i,
     printerO :: Printer (i, o),
-    printerA :: Printer (i, a),
-    ei :: i, eo :: o, ea :: a
+    printerA :: Printer (i, a)
   }
 
 -- [[[ Data generation ]]]
@@ -91,9 +91,9 @@ instance Indexable V.Vector where
   index = (V.!)
   size = V.length
 
-instance Indexable Data.Vector.Strict.Vector where
-  index = (Data.Vector.Strict.!)
-  size = Data.Vector.Strict.length
+instance Indexable VS.Vector where
+  index = (VS.!)
+  size = VS.length
 
 choose :: Indexable c => c a -> Gen s a
 choose xs = let n = size xs in index xs <$> genr 0 n
@@ -154,3 +154,9 @@ vsort v' = V.create do
 
 vinverse :: Vector Int -> Vector Int
 vinverse p = V.update_ p p (V.enumFromN 0 $ V.length p)
+
+-- Orphan instances
+instance Default (V.Vector a) where
+  def = V.empty
+instance Default (VS.Vector a) where
+  def = VS.empty

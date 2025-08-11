@@ -76,6 +76,7 @@ common dependencies
                     , microlens-th
                     , directory
                     , attoparsec
+                    , data-default
 
 
 library
