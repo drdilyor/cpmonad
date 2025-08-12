@@ -87,16 +87,16 @@ runProblem (Problem {..}) = do
       verdict <- foldl1' mergeVerdict' <$> forM tests \(i, a) -> do
         o' <- timeout 100_000 (evaluate . force $ f i)
         case o' of
-          Nothing -> putStr "T" $> (TLE, (i, a, def))
+          Nothing -> putStr "T" $> (Bad TLE, (i, a, def))
           Just o -> if check i a o
-            then putStr "." $> (AC 1, (i, a, o))
-            else putStr "X" $> (WA, (i, a, o))
+            then putStr "." $> (Pts 1, (i, a, o))
+            else putStr "X" $> (Pts 0, (i, a, o))
       putStrLn ""
       pure verdict
 
   forM_ (zip [0 :: Int ..] verdicts) \case
-    (ix, (AC x, _)) -> do
-      putStrLn $ "sol " <> show ix <> ": AC " <> show (round (x * 100) :: Int) <> "%"
+    (ix, (Pts x, _)) | x > 0 -> do
+      putStrLn $ "sol " <> show ix <> ": Pts " <> show (round (x * 100) :: Int) <> "%"
     (ix, (_, (i, a, o))) -> do
       putStrLn $ "sol " <> show ix <> ": WA:"
       B.putStrLn $ ">>> input:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i) <> "\n"

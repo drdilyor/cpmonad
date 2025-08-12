@@ -1,11 +1,20 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 module Cpmonad(
+  VerdictBad(..),
   Verdict(..),
+  wa,
+  ac,
+  mkPts,
+  getPoints,
+  hasPoints,
   mergeVerdict',
+
   Problem(..),
 
-  Gen(..),
+  Gen,
+  lift,
+  state,
   runGen,
   genr,
   genri,
@@ -32,30 +41,47 @@ import Data.Vector.Algorithms.Merge qualified as VA
 import System.Random (uniformR, StdGen)
 import Printer
 import Control.Monad.State.Strict (StateT (..), state, lift)
-import Control.Monad.Identity (Identity)
 import Control.Monad.ST
 import Control.Monad (forM_)
-import Data.STRef
 
 -- [[[ Basics ]]]
--- AC x  where x must be between 0 and 1
 
-data Verdict = AC Float | WA | RE | TLE | Other
+-- Pts x where x must be between 0 and 1
+data Verdict = Pts Float | Bad VerdictBad deriving (Show)
+
+data VerdictBad = RE | TLE | Other String deriving (Show)
+
+wa :: Verdict
+wa = Pts 0
+
+ac :: Verdict
+ac = Pts 1
+
+-- clamp the points
+mkPts :: Float -> Verdict
+mkPts x = Pts (0 `max` x `min` 1)
+
+getPoints :: Verdict -> Float
+getPoints (Pts x) = x
+getPoints _ = 0
+
+hasPoints :: Verdict -> Bool
+hasPoints x = getPoints x > 0
 
 mergeVerdict' :: (Verdict, b) -> (Verdict, b) -> (Verdict, b)
 mergeVerdict' a b = case (a, b) of
-  ((AC x, _), (AC y, _))
+  ((Pts x, _), (Pts y, _))
     | x < y -> a
     | otherwise -> b
-  ((AC _, _), _) -> b
-  (_, (AC _, _)) -> a
+  ((Pts _, _), _) -> b
+  (_, (Pts _, _)) -> a
   (_, _) -> a
 
 instance Semigroup Verdict where
   a <> b = fst $ mergeVerdict' (a, ()) (b, ())
 
 instance Monoid Verdict where
-  mempty = AC 1
+  mempty = Pts 1
 
 data Problem i o a = Problem
   { tests :: [(i, a)],
