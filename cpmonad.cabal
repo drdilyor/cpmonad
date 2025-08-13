@@ -12,7 +12,7 @@ extra-doc-files:    CHANGELOG.md
 extra-source-files:
 
 common ghc
-    ghc-options: -Wall
+    ghc-options: -Wall -Wno-name-shadowing
     default-extensions:
         BangPatterns
         BinaryLiterals

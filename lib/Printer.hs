@@ -9,19 +9,18 @@ module Printer(
   endl,
   sp,
   pvecvecint,
-  idl,
 ) where
 
 import Control.Monad.ST (runST)
 import Data.ByteString.Builder qualified as B
 import Data.ByteString.Char8 qualified as B
 import Data.ByteString.Char8(ByteString)
+import Data.Default
 import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as VM
 
 import Lens.Micro
-import Data.Maybe (fromJust)
 
 data Printer a = Printer
   { toPrinted :: a -> Maybe B.Builder,
@@ -133,8 +132,5 @@ pvecvecint n m arr = Printer {..}
             pure $ (x & arr .~ v',) <$> res
 
 
-len :: Lens' (Vector Int) Int
-len = lens V.length (\_ n -> V.replicate n 0)
-
-idl :: Lens' a a
-idl = lens id (const id)
+len :: Default a => Lens' (Vector a) Int
+len = lens V.length (\_ n -> V.replicate n def)

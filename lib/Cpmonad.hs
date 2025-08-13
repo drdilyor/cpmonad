@@ -28,21 +28,37 @@ module Cpmonad(
 
   vsort,
   vinverse,
+  runSolutions,
+  generateTests',
+
+  Default,
+  NFData,
 ) where
 
+import Control.DeepSeq
+import Control.Exception
+import Control.Monad
+import Control.Monad.ST
+import Control.Monad.State.Strict (StateT (..), state, lift)
+import Data.ByteString.Builder qualified as B
+import Data.ByteString.Char8 qualified as B
 import Data.Default
-import Data.Set qualified as Set
 import Data.List
+import Data.Maybe (fromJust)
+import Data.Set qualified as Set
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as VM
 import Data.Vector.Strict qualified as VS
 import Data.Vector.Algorithms.Merge qualified as VA
+import System.CPUTime
+import System.Directory
+import System.IO
+import System.IO.Error (isDoesNotExistError)
 import System.Random (uniformR, StdGen)
+
 import Printer
-import Control.Monad.State.Strict (StateT (..), state, lift)
-import Control.Monad.ST
-import Control.Monad (forM_)
+import System.Timeout (timeout)
 
 -- [[[ Basics ]]]
 
@@ -83,14 +99,97 @@ instance Semigroup Verdict where
 instance Monoid Verdict where
   mempty = Pts 1
 
-data Problem i o a = Problem
-  { tests :: [(i, a)],
-    sols :: [i -> o],
-    check :: i -> a -> o -> Bool,
-    printerI :: Printer i,
-    printerO :: Printer (i, o),
-    printerA :: Printer (i, a)
-  }
+data Problem i a o where
+  Problem ::
+    (NFData i, NFData a, NFData o,
+     Default i, Default a, Default o,
+     Eq i, Eq a, Eq o) =>
+    { tests :: [(i, a)],
+      sols :: [i -> o],
+      check :: i -> a -> o -> Bool,
+      printerI :: Printer i,
+      printerA :: Printer (i, a),
+      printerO :: Printer (i, o)
+    } ->
+    Problem i a o
+
+wrapAction :: String -> IO a -> IO a
+wrapAction name step = do
+  putStrLn $ ":: " <> name <> " ..."
+  start <- getCPUTime
+  res <- step
+  end <- getCPUTime
+  let diffms = (round :: Double -> Int) $ fromIntegral (end - start) / (10 ^ (9 :: Int))
+  putStrLn $ "   took " <> show diffms <> "ms"
+  pure res
+
+generateTests' :: Problem i a o -> IO ()
+generateTests' Problem {..} = do
+  wrapAction "cleaning up" do
+    catchJust (\e -> if isDoesNotExistError e then Just e else Nothing)
+      (removeDirectoryRecursive "tests")
+      (const $ pure ())
+    createDirectoryIfMissing False "tests"
+
+  _ <- wrapAction "evaluating tests" $ evaluate $ force tests
+
+  wrapAction "outputting tests" do
+    forM_ (zip [0 :: Int ..] tests) \(ix, (i, a)) -> do
+      h <- openBinaryFile ("tests/" <> show ix <> ".in") WriteMode
+      hSetBuffering h (BlockBuffering $ Just 4096)
+      B.hPutBuilder h . fromJust $ printerI.toPrinted i
+      hClose h
+
+      h <- openBinaryFile ("tests/" <> show ix <> ".out") WriteMode
+      hSetBuffering h (BlockBuffering $ Just 4096)
+      B.hPutBuilder h . fromJust $ printerA.toPrinted (i, a)
+      hClose h
+
+  wrapAction "parsing outputs" do
+    forM_ (zip [0 :: Int ..] tests) \(ix, _) -> do
+      -- TODO
+      s <- B.readFile ("tests/" <> show ix <> ".in")
+      let i = fst . fromJust $ printerI.fromPrinted (def, s)
+      s <- B.readFile ("tests/" <> show ix <> ".out")
+      let a = fst <$> printerA.fromPrinted ((i, def), s)
+      _ <- evaluate $ force (i, a)
+      pure ()
+
+  -- only for checking the performance of the printer itself
+  wrapAction "transcoding tests" do
+    forM_ (zip [0 :: Int ..] tests) \(_, (i, a)) -> do
+      let i' = fmap fst . printerI.fromPrinted . (def,) . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i
+      let a' = do i <- i'
+                  fmap (snd . fst) . printerA.fromPrinted . ((i, def),) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)
+      when (i' /= Just i) $ putStrLn "input didn't match!!!"
+      when (a' /= Just a) $ putStrLn "aux didn't match!!!"
+
+runSolutions :: Problem i a o -> IO ()
+runSolutions Problem {..} = do
+  verdicts <- wrapAction "running" do
+    forM (zip [0 :: Int ..] sols) \(ix, f) -> do
+      putStr $ "sol " <> show ix <> ": "
+      verdict <- foldl1' mergeVerdict' <$> forM tests \(i, a) -> do
+        o' <- timeout 100_000 (evaluate . force $ f i)
+        case o' of
+          Nothing -> putStr "T" >> pure (Bad TLE, (i, a, Nothing))
+          Just o -> if check i a o
+            then putStr "." >> pure (Pts 1, (i, a, Just o))
+            else putStr "X" >> pure (Pts 0, (i, a, Just o))
+      putStrLn ""
+      pure verdict
+
+  wrapAction "evaluating" do
+    forM_ (zip [0 :: Int ..] verdicts) \case
+      (ix, (Pts x, _)) | x > 0 -> do
+        putStrLn $ "sol " <> show ix <> ": Pts " <> show (round (x * 100) :: Int) <> "%"
+      (ix, (_, (i, a, o))) -> do
+        putStrLn $ "sol " <> show ix <> ": WA:"
+        B.putStrLn $ ">>> input:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i) <> "\n"
+        case o of
+          Just o -> B.putStrLn $ ">>> output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerO.toPrinted (i, o)) <> "\n"
+          _ -> pure ()
+        B.putStrLn $ ">>> test output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)) <> "\n"
 
 -- [[[ Data generation ]]]
 
@@ -171,7 +270,8 @@ gendistinct n g = VM.new n >>= go 0 Set.empty
           VM.write v i x
           go (i + 1) (Set.insert x seen) v
 
--- Utility functions
+-- [[[ Utility functions ]]]
+
 vsort :: Vector Int -> Vector Int
 vsort v' = V.create do
   v <- V.unsafeThaw v'
@@ -181,8 +281,10 @@ vsort v' = V.create do
 vinverse :: Vector Int -> Vector Int
 vinverse p = V.update_ p p (V.enumFromN 0 $ V.length p)
 
--- Orphan instances
+-- [[[ Orphan instances ]]]
+
 instance Default (V.Vector a) where
   def = V.empty
+
 instance Default (VS.Vector a) where
   def = VS.empty

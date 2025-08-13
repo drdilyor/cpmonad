@@ -1,107 +1,16 @@
-{-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-type-defaults #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Main where
 
-import Control.DeepSeq (deepseq, force, NFData)
-import Control.Exception (catchJust)
-import Control.Monad (forM, forM_, when)
-import Data.ByteString.Builder qualified as B
-import Data.ByteString.Char8 qualified as B
-import Data.Default
-import Data.Functor (($>))
-import Data.List (foldl1')
 import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
 import Lens.Micro
 import Lens.Micro.TH
-import System.CPUTime (getCPUTime)
-import System.Directory
-import System.IO
-import System.IO.Error (isDoesNotExistError)
 import System.Random (mkStdGen)
 
 import Cpmonad
 import Printer
-import Data.Maybe (fromJust, fromMaybe)
 import GHC.Generics (Generic)
-import System.Timeout (timeout)
-import Control.Exception.Base (evaluate)
-
-runProblem :: (NFData a, NFData i, Eq i, Eq a, Show i, Show a, NFData o, Default o, Default i, Default a) => Problem i o a -> IO ()
-runProblem (Problem {..}) = do
-  -- output tests
-  catchJust (\e -> if isDoesNotExistError e then Just e else Nothing)
-    (removeDirectoryRecursive "tests")
-    (const $ pure ())
-
-  createDirectoryIfMissing False "tests"
-
-  putStr "generating tests ...  "
-  start <- tests `deepseq` getCPUTime
-  forM_ (zip [0 :: Int ..] tests) \(ix, (i, a)) -> do
-    h <- openBinaryFile ("tests/" <> show ix <> ".in") WriteMode
-    hSetBuffering h (BlockBuffering $ Just 4096)
-    B.hPutBuilder h . fromJust $ printerI.toPrinted i
-    hClose h
-
-    h <- openBinaryFile ("tests/" <> show ix <> ".out") WriteMode
-    hSetBuffering h (BlockBuffering $ Just 4096)
-    B.hPutBuilder h . fromJust $ printerA.toPrinted (i, a)
-    hClose h
-  end <- getCPUTime
-  let diffms = round $ fromIntegral (end - start) / (10^9)
-  putStrLn $ "took " <> show diffms <> "ms"
-
-  putStr "parsing tests ...     "
-  start <- getCPUTime
-  forM_ (zip [0 :: Int ..] tests) \(ix, _) -> do
-    s <- B.readFile ("tests/" <> show ix <> ".in")
-    let i = fst . fromJust $ printerI.fromPrinted (def, s)
-    s <- B.readFile ("tests/" <> show ix <> ".out")
-    let a = fst <$> printerA.fromPrinted ((i, def), s)
-    -- putStrLn $ "test " <> show ix
-    -- putStrLn $ "  " <> show (tests !! ix)
-    -- hFlush stdout
-    i `deepseq` a `deepseq` pure ()
-  end <- getCPUTime
-  let diffms = round $ fromIntegral (end - start) / (10^9)
-  putStrLn $ "took " <> show diffms <> "ms"
-
-  putStr "transcoding tests ... "
-  start <- getCPUTime
-  forM_ (zip [0 :: Int ..] tests) \(_, (i, a)) -> do
-    let i' = fmap fst . printerI.fromPrinted . (def,) . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i
-    let a' = do i <- i'
-                fmap (snd . fst) . printerA.fromPrinted . ((i, def),) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)
-    when (i' /= Just i) $ putStrLn "input didn't match!!!"
-    when (a' /= Just a) $ putStrLn "aux didn't match!!!"
-  end <- getCPUTime
-  let diffms = round $ fromIntegral (end - start) / (10^9)
-  putStrLn $ "took " <> show diffms <> "ms"
-
-  -- run solutions
-  verdicts <-
-    forM (zip [0 :: Int ..] sols) \(ix, f) -> do
-      putStr $ "sol " <> show ix <> ": "
-      verdict <- foldl1' mergeVerdict' <$> forM tests \(i, a) -> do
-        o' <- timeout 100_000 (evaluate . force $ f i)
-        case o' of
-          Nothing -> putStr "T" $> (Bad TLE, (i, a, def))
-          Just o -> if check i a o
-            then putStr "." $> (Pts 1, (i, a, o))
-            else putStr "X" $> (Pts 0, (i, a, o))
-      putStrLn ""
-      pure verdict
-
-  forM_ (zip [0 :: Int ..] verdicts) \case
-    (ix, (Pts x, _)) | x > 0 -> do
-      putStrLn $ "sol " <> show ix <> ": Pts " <> show (round (x * 100) :: Int) <> "%"
-    (ix, (_, (i, a, o))) -> do
-      putStrLn $ "sol " <> show ix <> ": WA:"
-      B.putStrLn $ ">>> input:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i) <> "\n"
-      B.putStrLn $ ">>> output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromMaybe "" $ printerO.toPrinted (i, o)) <> "\n"
-      B.putStrLn $ ">>> test output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)) <> "\n"
 
 data Input = Input
   { _n :: Int,
@@ -116,6 +25,31 @@ instance Default Input where
 type Output = Vector Int
 
 makeLenses ''Input
+
+p :: Problem Input Output Output
+p =
+  Problem
+    { tests = map (\x -> (x, model x)) (genAll (
+        map (\(v, u) -> pure $ Input (length v) (V.fromList v) (length u) (V.fromList u))
+          [ ([1, 3, 2, 5],[(0,1)]),
+            ([1, 3, 2, 5],[(0,2)]),
+            ([1, 3, 2, 5],[(0,3)])
+          ]
+        <> replicate 1 (gen1 20 20)
+        <> replicate 1 (gen1 2000 2000)
+        <> replicate 1 (gen1 20000 20000)
+        <> replicate 1 (gen1 200000 200000)
+        )),
+      sols = [sol1, sol1, sol1, sol2],
+      check = const (==),
+      printerI = pint n <> endl
+                <> pvec sp n arr 0 (pint id) <> endl
+                <> pint q <> endl
+                <> pvec endl q queries (0,0) (pint _1 <> sp <> pint _2),
+      printerO = pvecint sp (_1 . q) _2,
+      printerA = pvecint endl (_1 . q) _2
+    }
+
 
 sol1 :: Input -> Output
 sol1 (Input _ arr _ queries) =
@@ -151,29 +85,5 @@ model = sol1
 genAll :: forall a. (forall s. [Gen s a]) -> [a]
 genAll xs = fst $ runGen (sequence xs) (mkStdGen 1)
 
-p :: Problem Input Output Output
-p =
-  Problem
-    { tests = map (\x -> (x, model x)) (genAll (
-        map (\(v, u) -> pure $ Input (length v) (V.fromList v) (length u) (V.fromList u))
-          [ ([1, 3, 2, 5],[(0,1)]),
-            ([1, 3, 2, 5],[(0,2)]),
-            ([1, 3, 2, 5],[(0,3)])
-          ]
-        <> replicate 1 (gen1 20 20)
-        <> replicate 1 (gen1 2000 2000)
-        <> replicate 1 (gen1 20000 20000)
-        <> replicate 1 (gen1 200000 200000)
-        )),
-      sols = [sol1, sol1, sol1, sol2],
-      check = const (==),
-      printerI = pint n <> endl
-                <> pvec sp n arr 0 (pint idl) <> endl
-                <> pint q <> endl
-                <> pvec endl q queries (0,0) (pint _1 <> sp <> pint _2),
-      printerO = pvecint sp (_1 . q) _2,
-      printerA = pvecint endl (_1 . q) _2
-    }
-
 main :: IO ()
-main = runProblem p
+main = generateTests' p >> runSolutions p
