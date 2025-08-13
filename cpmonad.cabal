@@ -82,8 +82,7 @@ common dependencies
 library
     import:           ghc, dependencies
 
-    exposed-modules: Cpmonad, Printer
-
+    exposed-modules: Cpmonad, Cpmonad.Gen, Cpmonad.Misc, Cpmonad.Printer
     hs-source-dirs:   lib
 
 executable exe
@@ -97,7 +96,7 @@ test-suite test
     ghc-options: -Wno-missing-signatures
     type: exitcode-stdio-1.0
     main-is: Spec.hs
-    other-modules: PrinterSpec
+    other-modules: Cpmonad.PrinterSpec
 
     build-depends:
           cpmonad

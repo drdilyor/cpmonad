@@ -1,4 +1,5 @@
-module Printer(
+{-# OPTIONS_GHC -Wno-unused-imports #-}
+module Cpmonad.Printer(
   Printer(..),
   char,
   pint,
@@ -19,8 +20,8 @@ import Data.Default
 import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as VM
-
 import Lens.Micro
+import Cpmonad.Misc
 
 data Printer a = Printer
   { toPrinted :: a -> Maybe B.Builder,

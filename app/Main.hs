@@ -9,8 +9,6 @@ import Lens.Micro.TH
 import System.Random (mkStdGen)
 
 import Cpmonad
-import Printer
-import GHC.Generics (Generic)
 
 data Input = Input
   { _n :: Int,
@@ -18,9 +16,7 @@ data Input = Input
     _q :: Int,
     _queries :: Vector (Int, Int)
   }
-  deriving (Show, Eq, Generic, NFData)
-
-instance Default Input where
+  deriving (Show, Eq, Generic, NFData, Default)
 
 type Output = Vector Int
 

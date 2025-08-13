@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
-module PrinterSpec where
+module Cpmonad.PrinterSpec where
 
 import Prelude hiding (print)
 import Data.ByteString.Builder qualified as B
@@ -7,14 +7,13 @@ import Data.ByteString.Char8 qualified as B
 import Data.ByteString.Char8(ByteString)
 import Data.List (intersperse)
 import Data.String (IsString)
-import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
 import Lens.Micro
 import Test.Hspec
 import Test.Hspec.QuickCheck
 import Test.QuickCheck
 
-import Printer
+import Cpmonad.Printer
 
 toPrinted' :: Printer a -> a -> Maybe ByteString
 toPrinted' p x = B.toStrict . B.toLazyByteString <$> p.toPrinted x
