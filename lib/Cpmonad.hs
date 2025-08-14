@@ -185,13 +185,14 @@ generateTests' Problem {..} = do
 runSolutions :: Problem i a o -> IO ()
 runSolutions Problem {..} = do
   -- TODO: parallelize. requires reworking
+  -- TODO: fix the time, it shows "took 0ms"
   sols <- wrapAction "compiling" do
     cleanDirectory "tmp"
     flip filterM sols \case
       SolutionHs {} -> pure True
       SolutionExt {name, compileCmds} -> do
         putStrLn $ "-- " <> name
-        handle @IOError (const $ putStrLn "compilation failed" >> pure False) do
+        handle @IOError (const $ putStrLn "-- compilation failed" >> pure False) do
           forM_ compileCmds (uncurry callProcess)
           pure True
 

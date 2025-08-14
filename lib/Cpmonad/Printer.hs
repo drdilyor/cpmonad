@@ -2,14 +2,16 @@
 module Cpmonad.Printer(
   Printer(..),
   char,
+  sp,
+  endl,
+  nest,
   pint,
   pvec,
+  pvecN,
   pvecint,
-  nest,
-  len,
-  endl,
-  sp,
+  pvecintN,
   pvecvecint,
+  len,
 ) where
 
 import Control.Monad.ST (runST)
@@ -77,9 +79,11 @@ pint = nest Printer {..}
       (n, s') <- B.readInt (skipSpace s)
       pure (n, s')
 
+pvec :: Default b => (forall c. Printer c) -> Lens' a (Vector b) -> Printer b -> Printer a
+pvec sep arr p = pvecN sep (arr . len) arr p
 
-pvec :: (forall c. Printer c) -> SimpleGetter a Int -> Lens' a (Vector b) -> b -> Printer b -> Printer a
-pvec sep n arr e p = Printer {..}
+pvecN :: Default b => (forall c. Printer c) -> SimpleGetter a Int -> Lens' a (Vector b) -> Printer b -> Printer a
+pvecN sep n arr p = Printer {..}
   where
     toPrinted !x
       | x ^. n /= V.length (x ^. arr) = Nothing
@@ -99,15 +103,18 @@ pvec sep n arr e p = Printer {..}
                         case sep.fromPrinted ((), s) of
                           Nothing -> pure Nothing
                           Just (_, s2) ->
-                            case p.fromPrinted (e, s2)  of
+                            case p.fromPrinted (def, s2)  of
                               Nothing -> pure Nothing
                               Just (val, s3) -> VM.write v i val >> go s3 (i + 1)
               res <- go s' 0
               v' <- V.freeze v
               pure $ (x & arr .~ v',) <$> res
 
-pvecint :: (forall b. Printer b) -> SimpleGetter a Int -> Lens' a (V.Vector Int) -> Printer a
-pvecint sep n arr = pvec sep n arr 0 (pint id)
+pvecint :: (forall b. Printer b) -> Lens' a (V.Vector Int) -> Printer a
+pvecint sep arr = pvec sep arr (pint id)
+
+pvecintN :: (forall b. Printer b) -> SimpleGetter a Int -> Lens' a (V.Vector Int) -> Printer a
+pvecintN sep n arr = pvecN sep n arr (pint id)
 
 pvecvecint :: SimpleGetter a Int -> SimpleGetter a Int -> Lens' a (Vector (Vector Int)) -> Printer a
 pvecvecint n m arr = Printer {..}
@@ -115,10 +122,10 @@ pvecvecint n m arr = Printer {..}
     toPrinted !x
       | x ^. n /= V.length (x ^. arr) = Nothing
       | otherwise =
-            let vec i = (pvecint sp _1 _2).toPrinted (x ^. m, (x ^. arr) ! i)
+            let vec i = (pvecintN sp _1 _2).toPrinted (x ^. m, (x ^. arr) ! i)
              in mconcat [vec i <> Just (B.char8 '\n') | i <- [0 .. x ^. n - 1]]
     fromPrinted (!x, !s') =
-      let vec s i = (pvecint sp _1 _2).fromPrinted ((x ^. m, (x ^. arr) ! i), s)
+      let vec s i = (pvecintN sp _1 _2).fromPrinted ((x ^. m, (x ^. arr) ! i), s)
        in runST do
             let count = x ^. n
             v <- VM.new count

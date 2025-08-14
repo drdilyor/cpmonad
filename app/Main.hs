@@ -11,9 +11,7 @@ import System.Random (mkStdGen)
 import Cpmonad
 
 data Input = Input
-  { _n :: Int,
-    _arr :: Vector Int,
-    _q :: Int,
+  { _arr :: Vector Int,
     _queries :: Vector (Int, Int)
   }
   deriving (Show, Eq, Generic, NFData, Default)
@@ -26,7 +24,7 @@ p :: Problem Input Output Output
 p =
   Problem
     { tests = map (\x -> (x, model x)) (genAll (
-        map (\(v, u) -> pure $ Input (length v) (V.fromList v) (length u) (V.fromList u))
+        map (\(v, u) -> pure $ Input (V.fromList v) (V.fromList u))
           [ ([1, 3, 2, 5],[(0,1)]),
             ([1, 3, 2, 5],[(0,2)]),
             ([1, 3, 2, 5],[(0,3)])
@@ -44,34 +42,33 @@ p =
           cpp "test"
         ],
       check = const (==),
-      printerI = pint n <> endl
-                <> pvec sp n arr 0 (pint id) <> endl
-                <> pint q <> endl
-                <> pvec endl q queries (0,0) (pint _1 <> sp <> pint _2),
-      printerO = pvecint sp (_1 . q) _2,
-      printerA = pvecint endl (_1 . q) _2,
+      printerI = pint (arr . len) <> endl
+                <> pvec sp arr (pint id) <> endl
+                <> pint (queries . len) <> endl
+                <> pvec endl queries (pint _1 <> sp <> pint _2),
+      printerO = pvecintN sp (_1 . queries . len) _2,
+      printerA = pvecintN endl (_1 . queries . len) _2,
       timeLimit = 100_000
     }
 
 
 sol1 :: Input -> Output
-sol1 (Input _ arr _ queries) =
+sol1 (Input arr queries) =
   let pref = V.scanl' (+) 0 arr
       ans = flip V.map queries \(l, r) ->
         pref ! (r + 1) - pref ! l
    in ans
 
 sol2 :: Input -> Output
-sol2 (Input _ arr _ queries) =
+sol2 (Input arr queries) =
   let ans = flip V.map queries \(l, r) ->
         V.sum (V.slice l (r - l + 1) arr)
    in ans
 
 gen1 :: Int -> Int -> Gen s Input
 gen1 n q =
-  Input n
+  Input
     <$> V.replicateM n (genr 0 (10^9))
-    <*> pure q
     <*> V.replicateM q do
       l <- genr 0 n
       r <- genr 0 n
