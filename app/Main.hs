@@ -36,14 +36,21 @@ p =
         <> replicate 1 (gen1 20000 20000)
         <> replicate 1 (gen1 200000 200000)
         )),
-      sols = [sol1, sol1, sol1, sol2],
+      sols =
+        [ hs "sol11" sol1,
+          hs "sol12" sol1,
+          hs "sol13" sol1,
+          hs "sol2" sol2,
+          cpp "test"
+        ],
       check = const (==),
       printerI = pint n <> endl
                 <> pvec sp n arr 0 (pint id) <> endl
                 <> pint q <> endl
                 <> pvec endl q queries (0,0) (pint _1 <> sp <> pint _2),
       printerO = pvecint sp (_1 . q) _2,
-      printerA = pvecint endl (_1 . q) _2
+      printerA = pvecint endl (_1 . q) _2,
+      timeLimit = 100_000
     }
 
 

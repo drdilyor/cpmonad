@@ -77,6 +77,8 @@ common dependencies
                     , directory
                     , attoparsec
                     , data-default
+                    , process
+                    , temporary
 
 
 library
