@@ -18,6 +18,12 @@ module Cpmonad(
   hsio,
   cpp,
 
+  Tests(..),
+  testset,
+  subtask,
+  seedTests,
+  allTests,
+
   runSolutions,
   generateTests',
 
@@ -25,7 +31,7 @@ module Cpmonad(
   module Cpmonad.Printer,
   module Cpmonad.Misc,
 
-  Default,
+  Default(..),
   NFData,
   Generic,
 ) where
@@ -38,6 +44,9 @@ import Data.ByteString.Char8 qualified as B
 import Data.Default
 import Data.List
 import Data.Maybe (fromJust)
+import Data.Set qualified as Set
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import GHC.Generics (Generic)
 import System.CPUTime
 import System.Directory
@@ -51,6 +60,8 @@ import System.Process
 import Cpmonad.Gen
 import Cpmonad.Printer
 import Cpmonad.Misc
+import System.Random (StdGen, mkStdGen)
+import Data.Semigroup
 
 -- Pts x where x must be between 0 and 1
 data Verdict = Pts Float | Bad VerdictBad deriving (Show)
@@ -94,7 +105,7 @@ data Problem i a o where
     (NFData i, NFData a, NFData o,
      Default i, Default a, Default o,
      Eq i, Eq a, Eq o) =>
-    { tests :: [(i, a)],
+    { tests :: Tests (i, a),
       sols :: [Solution i o],
       check :: i -> a -> o -> Bool,
       printerI :: Printer i,
@@ -103,6 +114,68 @@ data Problem i a o where
       timeLimit :: Int
     } ->
     Problem i a o
+
+-- important: doesn't not check for name collisions
+
+data Tests a = Tests
+  { testsets :: Map String [a],
+    subtaskIncludes :: Map String [String],  -- refers to testsets
+    subtasks :: [String]
+  }
+  deriving (Functor, Generic, NFData)
+
+-- Getting out of ST because I don't want to deal with impredicative types
+type UnseededTests a = Tests (Gen a)
+
+instance Show (Tests a) where
+  show Tests {..} =
+    "Tests {"
+      <> "testsets = " <> show (([] :: [()]) <$ testsets) <> ", "
+      <> "subtaskIncludes = " <> show subtaskIncludes <> ", "
+      <> "subtasks = " <> show subtasks
+      <> "}"
+
+instance Semigroup (Tests a) where
+  a <> b =
+    Tests
+      { testsets = Map.unionWith (<>) a.testsets b.testsets,
+        subtaskIncludes = Map.unionWith (<>) a.subtaskIncludes b.subtaskIncludes,
+        subtasks = a.subtasks <> b.subtasks
+      }
+
+instance Monoid (Tests a) where
+  mempty = Tests mempty mempty mempty
+
+testset :: String -> [Gen a] -> UnseededTests a
+testset name gens = mempty { testsets = Map.singleton name gens }
+
+subtask :: String -> [String] -> [Gen a] -> UnseededTests a
+subtask name includes extra =
+  mempty
+    { subtaskIncludes = Map.singleton name includes,
+      subtasks = singleton name
+    }
+    <> case extra of
+      [] -> mempty
+      _ ->
+        mempty
+          { testsets = Map.singleton ("subtask-" <> name) extra,
+            subtaskIncludes = Map.singleton name ["subtask-" <> name]
+          }
+
+seedTests :: StdGen -> UnseededTests a -> Tests a
+seedTests s tests = tests { testsets = fst (runGen everything s) }
+  where
+    everything = traverse sequenceA tests.testsets
+
+allTests :: Tests a -> [(String, a)]
+allTests tests = do
+  let allTestsets = unique $ concatMap (tests.subtaskIncludes Map.!) tests.subtasks
+  (seti, setname) <- zip [0 ..] allTestsets
+  (testi, test) <- zip [0 ..] $ tests.testsets Map.! setname
+  pure (show seti <> "-" <> setname <> "-" <> show testi, test)
+  where
+    unique xs = reverse . snd $ foldl' (\(s, r) x -> if Set.member x s then (s, r) else (Set.insert x s, x : r)) (mempty, mempty) xs
 
 data Solution i o
   = SolutionHs {name :: String, f :: i -> IO o}
@@ -151,31 +224,32 @@ generateTests' Problem {..} = do
 
   _ <- wrapAction "evaluating tests" $ evaluate $ force tests
 
+
   wrapAction "outputting tests" do
-    forM_ (zip [0 :: Int ..] tests) \(ix, (i, a)) -> do
-      h <- openBinaryFile ("tests/" <> show ix <> ".in") WriteMode
+    forM_ (allTests tests) \(testName, (i, a)) -> do
+      h <- openBinaryFile ("tests/" <> testName <> ".in") WriteMode
       hSetBuffering h (BlockBuffering $ Just 4096)
       B.hPutBuilder h . fromJust $ printerI.toPrinted i
       hClose h
 
-      h <- openBinaryFile ("tests/" <> show ix <> ".out") WriteMode
+      h <- openBinaryFile ("tests/" <> testName <> ".out") WriteMode
       hSetBuffering h (BlockBuffering $ Just 4096)
       B.hPutBuilder h . fromJust $ printerA.toPrinted (i, a)
       hClose h
 
   wrapAction "parsing outputs" do
-    forM_ (zip [0 :: Int ..] tests) \(ix, _) -> do
+    forM_ (allTests tests) \(testName, _) -> do
       -- TODO
-      s <- B.readFile ("tests/" <> show ix <> ".in")
+      s <- B.readFile ("tests/" <> testName <> ".in")
       let i = fst . fromJust $ printerI.fromPrinted (def, s)
-      s <- B.readFile ("tests/" <> show ix <> ".out")
+      s <- B.readFile ("tests/" <> testName <> ".out")
       let a = fst <$> printerA.fromPrinted ((i, def), s)
       _ <- evaluate $ force (i, a)
       pure ()
 
   -- only for checking the performance of the printer itself
   wrapAction "transcoding tests" do
-    forM_ (zip [0 :: Int ..] tests) \(_, (i, a)) -> do
+    forM_ (allTests tests) \(_, (i, a)) -> do
       let i' = fmap fst . printerI.fromPrinted . (def,) . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i
       let a' = do i <- i'
                   fmap (snd . fst) . printerA.fromPrinted . ((i, def),) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)
@@ -200,7 +274,7 @@ runSolutions Problem {..} = do
     forM sols \sol -> do
       putStr $ "sol " <> sol.name <> ": "
       verdict <-
-        foldl1' mergeVerdict' <$> forM (zip [0 :: Int ..] tests) \(ix, (i, a)) -> do
+        foldl1' mergeVerdict' <$> forM (allTests tests) \(testName, (i, a)) -> do
           (o' :: Either VerdictBad o) <- case sol of
 
             SolutionHs {f} ->
@@ -208,8 +282,8 @@ runSolutions Problem {..} = do
                 maybe (Left TLE) Right <$> timeout timeLimit (evaluate . force =<< f i)
 
             SolutionExt {name, runCmd = (cmd, args)} -> do
-              withTempFile "tmp/" (name <> ".out") \outPath hOut -> do
-                code <- withFile ("tests/" <> show ix <> ".in") ReadMode \hIn -> do
+              withTempFile "tmp/" (testName <> ".out") \outPath hOut -> do
+                code <- withFile ("tests/" <> testName <> ".in") ReadMode \hIn -> do
                   let timeoutString = show (fromIntegral (round (fromIntegral timeLimit / 1000)) / 1000) <> "s"
                   withCreateProcess
                     -- GNU coreutils https://www.gnu.org/software/coreutils/timeout
