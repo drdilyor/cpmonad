@@ -5,8 +5,24 @@
 {-# HLINT ignore "Use replicateM_" #-}
 
 module Cpmonad(
-  VerdictBad(..),
+  Problem(..),
+  generateTests,
+  runSolutions,
+
+  Solution(..),
+  hs,
+  hsio,
+  cpp,
+
+  Tests(..),
+  UnseededTests,
+  testset,
+  subtask,
+  seedTests,
+  allTests,
+
   Verdict(..),
+  VerdictBad(..),
   wa,
   ac,
   mkPts,
@@ -14,28 +30,9 @@ module Cpmonad(
   hasPoints,
   mergeVerdict',
 
-  Problem(..),
-  Solution(..),
-  hs,
-  hsio,
-  cpp,
-
-  Tests(..),
-  testset,
-  subtask,
-  seedTests,
-  allTests,
-
-  runSolutions,
-  generateTests',
-
   module Cpmonad.Gen,
   module Cpmonad.Printer,
   module Cpmonad.Misc,
-
-  Default(..),
-  NFData,
-  Generic,
 ) where
 
 import Control.DeepSeq
@@ -69,43 +66,20 @@ import Control.Concurrent
 import Data.IORef
 import Control.Applicative ((<|>))
 
--- Pts x where x must be between 0 and 1
-data Verdict = Pts Float | Bad VerdictBad deriving (Show, Eq)
-
-data VerdictBad = PE | RE String | TLE | Other String deriving (Show, Eq)
-
-wa :: Verdict
-wa = Pts 0
-
-ac :: Verdict
-ac = Pts 1
-
--- clamp the points
-mkPts :: Float -> Verdict
-mkPts x = Pts (0 `max` x `min` 1)
-
-getPoints :: Verdict -> Float
-getPoints (Pts x) = x
-getPoints _ = 0
-
-hasPoints :: Verdict -> Bool
-hasPoints x = getPoints x > 0
-
-mergeVerdict' :: (Verdict, b) -> (Verdict, b) -> (Verdict, b)
-mergeVerdict' a b = case (a, b) of
-  ((Pts x, _), (Pts y, _))
-    | x < y -> a
-    | otherwise -> b
-  ((Pts _, _), _) -> b
-  (_, (Pts _, _)) -> a
-  (_, _) -> a
-
-instance Semigroup Verdict where
-  a <> b = fst $ mergeVerdict' (a, ()) (b, ())
-
-instance Monoid Verdict where
-  mempty = Pts 1
-
+-- | Central data specifying every part of the problem/task
+--
+-- It has three type parameters:
+-- 
+-- - @i@ is passed to solutions
+-- - @a@ is extra information stored with tests and passed onto grader.
+--   @i@ is written as .in files, @a@ as .out files
+-- - @o@ is what solutions need to compute
+--
+-- A problem requires 3 printers for each of the type parameters.
+-- A 'Printer' is a pair serializer and a deserializer.
+-- @printerA@/@printerO@ accepts @i@ to support parsing outputs that depend on input.
+--
+-- Currently it only supports batch tasks.
 data Problem i a o where
   Problem ::
     (NFData i, NFData a, NFData o,
@@ -117,96 +91,152 @@ data Problem i a o where
       printerI :: Printer i,
       printerA :: Printer (i, a),
       printerO :: Printer (i, o),
-      threads :: Int,
-      timeLimit :: Int
+      timeLimit :: Int  -- ^ time limit in microseconds
     } ->
     Problem i a o
 
--- important: doesn't not check for name collisions
+-- | Generate all tests of the problem to a directory @tests@. Cleans the directory in the process
+generateTests
+  :: Int  -- ^ number of (green)threads to use. Set it to @corecount - 1@ at most
+  -> Problem i a o
+  -> IO ()
+generateTests threads Problem {..} = do
+  wrapAction "cleaning up" $ cleanDirectory "tests"
 
-data Tests a = Tests
-  { testsets :: Map String [a],
-    subtaskIncludes :: Map String [String],  -- refers to testsets
-    subtasks :: [String]
-  }
-  deriving (Functor, Generic, NFData)
+  _ <- wrapAction "evaluating tests" $ do
+    parallelPooled threads progressCounter $ map (evaluate . force) $ concat $ Map.elems tests.testsets
+    putStrLn ""
 
--- Getting out of ST because I don't want to deal with impredicative types
-type UnseededTests a = Tests (Gen a)
+  wrapAction "outputting tests" do
+    parallelPooled threads progressCounter $ flip map (allTests tests) \(testName, (i, a)) -> do
+      h <- openBinaryFile ("tests/" <> testName <> ".in") WriteMode
+      hSetBuffering h (BlockBuffering $ Just 4096)
+      B.hPutBuilder h . fromJust $ printerI.toPrinted i
+      hClose h
 
-instance Show (Tests a) where
-  show Tests {..} =
-    "Tests {"
-      <> "testsets = " <> show (([] :: [()]) <$ testsets) <> ", "
-      <> "subtaskIncludes = " <> show subtaskIncludes <> ", "
-      <> "subtasks = " <> show subtasks
-      <> "}"
+      h <- openBinaryFile ("tests/" <> testName <> ".out") WriteMode
+      hSetBuffering h (BlockBuffering $ Just 4096)
+      B.hPutBuilder h . fromJust $ printerA.toPrinted (i, a)
+      hClose h
+    putStrLn ""
 
-instance Semigroup (Tests a) where
-  a <> b =
-    Tests
-      { testsets = Map.unionWith (<>) a.testsets b.testsets,
-        subtaskIncludes = Map.unionWith (<>) a.subtaskIncludes b.subtaskIncludes,
-        subtasks = a.subtasks <> b.subtasks
-      }
+  wrapAction "parsing outputs" do
+    parallelPooled threads progressCounter $ flip map (allTests tests) \(testName, (i, a)) -> do
+      s <- B.readFile ("tests/" <> testName <> ".in")
+      i' <- evaluate . force $ printerI.fromPrinted (def, s)
+      case i' of
+        Nothing -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: failed to parse input"
+        Just (i', _) | i' /= i -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: parsed input is different from original"
+        Just (i', _) -> do
+          s <- B.readFile ("tests/" <> testName <> ".out")
+          a' <- evaluate . force $ printerA.fromPrinted ((i', def), s)
+          case a' of
+            Nothing -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: failed to parse input"
+            Just ((_, a'), _) | a' /= a -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: parsed input is different from original"
+            Just _ -> pure ()
+    putStrLn ""
 
-instance Monoid (Tests a) where
-  mempty = Tests mempty mempty mempty
+  -- TODO: move this garbage out of here
+  let debug = False
+  when debug do
+    -- only for checking the performance of the printer itself
+    wrapAction "transcoding tests" do
+      forM_ (allTests tests) \(_, (i, a)) -> do
+        let i' = fmap fst . printerI.fromPrinted . (def,) . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i
+        let a' = i' >>= \i -> fmap (snd . fst) . printerA.fromPrinted . ((i, def),) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)
+        i' `deepseq` a' `deepseq` pure ()
 
-testset :: String -> [Gen a] -> UnseededTests a
-testset name gens = mempty { testsets = Map.singleton name gens }
+-- | Run all solutions on all tests.
+-- It is required to call 'generateTests' before this unless the tests are up to date
+runSolutions
+  :: Int  -- ^ number of (green)threads to use. Set it to @corecount - 1@ at most
+  -> Problem i a o
+  -> IO ()
+runSolutions threads Problem {..} = do
+  sols <- wrapAction "compiling" do
+    cleanDirectory "tmp"
+    filterM compileSolution sols
 
-subtask :: String -> [String] -> [Gen a] -> UnseededTests a
-subtask name includes extra =
-  mempty
-    { subtaskIncludes = Map.singleton name includes,
-      subtasks = singleton name
-    }
-    <> case extra of
-      [] -> mempty
-      _ ->
-        mempty
-          { testsets = Map.singleton ("subtask-" <> name) extra,
-            subtaskIncludes = Map.singleton name ["subtask-" <> name]
-          }
+  verdicts <- wrapAction "running" do
+    forM sols \sol -> do
+      let onProgress xs = do
+            putStr ("\r" <> "sol " <> sol.name <> ": " <> status)
+            hFlush stdout
+            where
+              status = flip map (V.toList xs) $ \case
+                Nothing -> ' '
+                Just (Bad e, _) -> case e of TLE -> 'T'; RE _ -> 'R'; PE -> 'P'; Other _ -> 'O'
+                Just (pts, _) -> if hasPoints pts then '.' else 'X'
 
-seedTests :: StdGen -> UnseededTests a -> Tests a
-seedTests s tests = tests { testsets = fst (runGen everything s) }
+      results <- parallelPooled threads onProgress $ flip map (allTests tests) \(testName, (i, a)) -> do
+        o <- runSolutionOnTest testName i sol
+        evaluateOutput testName i a o
+      putStrLn ""
+      pure $ foldl1' mergeVerdict' results
+
+  wrapAction "evaluating" do
+    forM_ (zip sols verdicts) \case
+      (sol, (Pts x, _)) | x > 0 -> do
+        putStrLn $ "sol " <> sol.name <> ": Pts " <> show (round (x * 100) :: Int) <> "%"
+      (sol, (verdict, (testName, i, _, o))) -> do
+        let readFileHead f = withFile f ReadMode $ flip B.hGetSome 100
+        putStrLn $ "sol " <> sol.name <> ": " <> case verdict of { Pts _ -> "WA"; Bad x -> show x } <> ":"
+
+        input <- readFileHead ("tests/" <> testName <> ".in")
+        B.putStrLn $ ">>> input:\n" <> input <> "\n"
+        judgeOutput <- readFileHead ("tests/" <> testName <> ".out")
+        B.putStrLn $ ">>> judge output:\n" <> judgeOutput <> "\n"
+        case o of
+          Just o -> B.putStrLn $ ">>> output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerO.toPrinted (i, o)) <> "\n"
+          _ -> pure ()
+
   where
-    everything = traverse sequenceA tests.testsets
+    compileSolution = \case
+      SolutionHs {} -> pure True
+      SolutionExt {name, compileCmds} -> do
+        putStrLn $ "-- " <> name
+        handle @IOError (const $ putStrLn "-- compilation failed" >> pure False) do
+          forM_ compileCmds (uncurry callProcess)
+          pure True
 
-allTests :: Tests a -> [(String, a)]
-allTests tests = do
-  let allTestsets = unique $ concatMap (tests.subtaskIncludes Map.!) tests.subtasks
-  (seti, setname) <- zip [0 ..] allTestsets
-  (testi, test) <- zip [0 ..] $ tests.testsets Map.! setname
-  pure (show seti <> "-" <> setname <> "-" <> show testi, test)
-  where
-    unique xs = reverse . snd $ foldl' (\(s, r) x -> if Set.member x s then (s, r) else (Set.insert x s, x : r)) (mempty, mempty) xs
+    runSolutionOnTest testName i = \case
+      SolutionHs {f} ->
+        handle @SomeException (pure . Left . RE . show) $
+          maybe (Left TLE) Right <$> timeout timeLimit (evaluate . force =<< f i)
 
-data Solution i o
-  = SolutionHs {name :: String, f :: i -> IO o}
-  | SolutionExt
-      { name :: String,
-        compileCmds :: [(FilePath, [String])],
-        runCmd :: (FilePath, [String]),
-        cleanupCmds :: [(FilePath, [String])]
-      }
+      SolutionExt {runCmd = (cmd, args)} -> do
+        withTempFile "tmp/" (testName <> ".out") \outPath hOut -> do
+          code <- withFile ("tests/" <> testName <> ".in") ReadMode \hIn -> do
+            let timeoutString = show (fromIntegral (round (fromIntegral timeLimit / 1000)) / 1000) <> "s"
+            withCreateProcess
+              -- GNU coreutils https://www.gnu.org/software/coreutils/timeout
+              (proc "timeout" $ ["--signal=KILL", timeoutString, cmd] <> args)
+                { delegate_ctlc = False,
+                  std_in = UseHandle hIn,
+                  -- hOut is closed here
+                  std_out = UseHandle hOut
+                }
+              \_ _ _ p -> waitForProcess p
+          case code of
+            -- timeout
+            ExitFailure 124 -> do
+              pure $ Left TLE
+            ExitFailure 125 -> do
+              pure $ Left $ RE "timeout command returned 125"
+            ExitFailure code -> do
+              pure $ Left $ RE $ "exit code " <> show code
+            ExitSuccess -> do
+              output <- B.readFile outPath
+              pure $ case printerO.fromPrinted ((i, def), output) of
+                Nothing -> Left PE
+                Just ((_, o), _) -> Right o
 
-hs :: String -> (i -> o) -> Solution i o
-hs name f = SolutionHs {name, f = pure . f}
-
-hsio :: String -> (i -> IO o) -> Solution i o
-hsio name f = SolutionHs {..}
-
-cpp :: String -> Solution i o
-cpp name =
-  SolutionExt
-    { name,
-      compileCmds = [("g++", ["./" <> name <> ".cpp", "-o", "tmp/" <> name <> ".exe", "-O3", "-march=native", "-Wall"])],
-      runCmd = ("tmp/" <> name <> ".exe", []),
-      cleanupCmds = []
-    }
+    evaluateOutput testName i a o =
+        pure $ case o of
+          Left e -> (Bad e, (testName, i, a, Nothing))
+          Right o
+            | check i a o -> (ac, (testName, i, a, Just o))
+            | otherwise -> (wa, (testName, i, a, Just o))
 
 wrapAction :: String -> IO a -> IO a
 wrapAction name step = do
@@ -218,6 +248,13 @@ wrapAction name step = do
   let diffms = (round :: Double -> Int) $ fromIntegral (end - start) / (10 ^ (9 :: Int))
   putStrLn $ "   took " <> show diffms <> "ms"
   pure res
+
+cleanDirectory :: FilePath -> IO ()
+cleanDirectory dir = do
+    catchJust (\e -> if isDoesNotExistError e then Just e else Nothing)
+      (removeDirectoryRecursive dir)
+      (const $ pure ())
+    createDirectoryIfMissing False dir
 
 -- we use explicit semaphores because otherwise multiple greenthreads will be interleaved on a single core,
 -- which will lead to TLEs because `timeout` considers total wall time
@@ -275,144 +312,190 @@ progressCounter v = do
   where
     doneCount = V.sum $ V.map (\case Just _ -> 1; Nothing -> 0) v
 
-cleanDirectory :: FilePath -> IO ()
-cleanDirectory dir = do
-    catchJust (\e -> if isDoesNotExistError e then Just e else Nothing)
-      (removeDirectoryRecursive dir)
-      (const $ pure ())
-    createDirectoryIfMissing False dir
+-- | A solution can either be a Haskell function or a collection of commands.
+-- The commands can use the @tmp@ directory in the current directory.
+--
+-- The names must be unique.
+--
+-- 'SolutionExt'\'s 'runCmd'\'s output will be redirected to a file.
+data Solution i o
+  = SolutionHs {name :: String, f :: i -> IO o}
+  | SolutionExt
+      { name :: String,
+        compileCmds :: [(FilePath, [String])],
+        runCmd :: (FilePath, [String]),
+        cleanupCmds :: [(FilePath, [String])]
+      }
 
-generateTests' :: Problem i a o -> IO ()
-generateTests' Problem {..} = do
-  wrapAction "cleaning up" $ cleanDirectory "tests"
+-- | Pure Haskell solution
+hs :: String -> (i -> o) -> Solution i o
+hs name f = SolutionHs {name, f = pure . f}
 
-  _ <- wrapAction "evaluating tests" $ do
-    parallelPooled threads progressCounter $ map (evaluate . force) $ concat $ Map.elems tests.testsets
-    putStrLn ""
+-- | IO Haskell solution
+hsio :: String -> (i -> IO o) -> Solution i o
+hsio name f = SolutionHs {..}
 
-  wrapAction "outputting tests" do
-    parallelPooled threads progressCounter $ flip map (allTests tests) \(testName, (i, a)) -> do
-      h <- openBinaryFile ("tests/" <> testName <> ".in") WriteMode
-      hSetBuffering h (BlockBuffering $ Just 4096)
-      B.hPutBuilder h . fromJust $ printerI.toPrinted i
-      hClose h
+-- | C++ solution with explicit path to the .cpp file and explicit compile-flags.
+cpp' :: [String] -> FilePath -> String -> Solution i o
+cpp' flags path name =
+  SolutionExt
+    { name,
+      compileCmds = [("g++", [path, "-o", "tmp/" <> name <> ".exe"] <> flags)],
+      runCmd = ("tmp/" <> name <> ".exe", []),
+      cleanupCmds = []
+    }
 
-      h <- openBinaryFile ("tests/" <> testName <> ".out") WriteMode
-      hSetBuffering h (BlockBuffering $ Just 4096)
-      B.hPutBuilder h . fromJust $ printerA.toPrinted (i, a)
-      hClose h
-    putStrLn ""
+-- | C++ solution with the file @\<name\>.cpp@ in the current directory and flags @-O2 and -Wall@.
+cpp :: String -> Solution i o
+cpp name = cpp' ["-O2", "-Wall"] (name <> ".cpp") name
 
-  wrapAction "parsing outputs" do
-    parallelPooled threads progressCounter $ flip map (allTests tests) \(testName, (i, a)) -> do
-      s <- B.readFile ("tests/" <> testName <> ".in")
-      i' <- evaluate . force $ printerI.fromPrinted (def, s)
-      case i' of
-        Nothing -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: failed to parse input"
-        Just (i', _) | i' /= i -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: parsed input is different from original"
-        Just (i', _) -> do
-          s <- B.readFile ("tests/" <> testName <> ".out")
-          a' <- evaluate . force $ printerA.fromPrinted ((i', def), s)
-          case a' of
-            Nothing -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: failed to parse input"
-            Just ((_, a'), _) | a' /= a -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: parsed input is different from original"
-            Just _ -> pure ()
-    putStrLn ""
+-- | Collection of 'testset's and 'subtask's.
+-- A testset is a named list of @a@. Testsets can be included in subtasks.
+-- /Tests that are never referenced from subtasks are ignored./
+-- 
+-- Important: doesn't not check for name collisions. Everything is merged!
+--
+-- Note: the type parameter @a@ has nothing to do with @a@ in 'Problem'!
+--
+-- ==== __Examples:__
+--
+-- @
+-- testset "sample" [pure 1, pure 2]
+-- <> testset "small" $ replicate 5 $ genr 1 100
+-- <> testset "big"   $ replicate 5 $ genr 100 (10^9)
+-- <> subtask "brute" ["sample", "small"] []
+-- <> subtask "full" ["sample", "small", "big"] []
+-- @
+-- 
+data Tests a = Tests
+  { testsets :: Map String [a],
+    subtaskIncludes :: Map String [String],  -- ^ mapping from subtask names to testset names
+    subtasks :: [String]
+  }
+  deriving (Functor, Generic, NFData)
 
-  -- TODO: move this garbage out of here
-  let debug = False
-  when debug do
-    -- only for checking the performance of the printer itself
-    wrapAction "transcoding tests" do
-      forM_ (allTests tests) \(_, (i, a)) -> do
-        let i' = fmap fst . printerI.fromPrinted . (def,) . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i
-        let a' = i' >>= \i -> fmap (snd . fst) . printerA.fromPrinted . ((i, def),) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)
-        i' `deepseq` a' `deepseq` pure ()
+-- | Tests that need to be seeded yet
+type UnseededTests a = Tests (Gen a)
 
-runSolutions :: Problem i a o -> IO ()
-runSolutions Problem {..} = do
-  -- TODO: parallelize. requires reworking
-  sols <- wrapAction "compiling" do
-    cleanDirectory "tmp"
-    filterM compileSolution sols
+instance Show (Tests a) where
+  show Tests {..} =
+    "Tests {"
+      <> "testsets = " <> show (([] :: [()]) <$ testsets) <> ", "
+      <> "subtaskIncludes = " <> show subtaskIncludes <> ", "
+      <> "subtasks = " <> show subtasks
+      <> "}"
 
-  verdicts <- wrapAction "running" do
-    forM sols \sol -> do
-      let onProgress xs = do
-            putStr ("\r" <> "sol " <> sol.name <> ": " <> status)
-            hFlush stdout
-            where
-              status = flip map (V.toList xs) $ \case
-                Nothing -> ' '
-                Just (Bad e, _) -> case e of TLE -> 'T'; RE _ -> 'R'; PE -> 'P'; Other _ -> 'O'
-                Just (pts, _) -> if hasPoints pts then '.' else 'X'
+instance Semigroup (Tests a) where
+  a <> b =
+    Tests
+      { testsets = Map.unionWith (<>) a.testsets b.testsets,
+        subtaskIncludes = Map.unionWith (<>) a.subtaskIncludes b.subtaskIncludes,
+        subtasks = a.subtasks <> b.subtasks
+      }
 
-      results <- parallelPooled threads onProgress $ flip map (allTests tests) \(testName, (i, a)) -> do
-        o <- runSolutionOnTest testName i sol
-        evaluateOutput testName i a o
-      putStrLn ""
-      pure $ foldl1' mergeVerdict' results
+instance Monoid (Tests a) where
+  mempty = Tests mempty mempty mempty
 
-  wrapAction "evaluating" do
-    forM_ (zip sols verdicts) \case
-      (sol, (Pts x, _)) | x > 0 -> do
-        putStrLn $ "sol " <> sol.name <> ": Pts " <> show (round (x * 100) :: Int) <> "%"
-      (sol, (verdict, (testName, i, _, o))) -> do
-        let readFileHead f = withFile f ReadMode $ flip B.hGetSome 100
-        putStrLn $ "sol " <> sol.name <> ": " <> case verdict of { Pts _ -> "WA"; Bad x -> show x } <> ":"
+-- | Make a single testset with the given name and the objects
+testset :: String -> [Gen a] -> UnseededTests a
+testset name gens = mempty { testsets = Map.singleton name gens }
 
-        input <- readFileHead ("tests/" <> testName <> ".in")
-        B.putStrLn $ ">>> input:\n" <> input <> "\n"
-        judgeOutput <- readFileHead ("tests/" <> testName <> ".out")
-        B.putStrLn $ ">>> judge output:\n" <> judgeOutput <> "\n"
-        case o of
-          Just o -> B.putStrLn $ ">>> output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerO.toPrinted (i, o)) <> "\n"
-          _ -> pure ()
+-- | Make a subtask with the given name, included testsets, and extra tests.
+-- Extra tests are put after the included testcases
+subtask :: String -> [String] -> [Gen a] -> UnseededTests a
+subtask name includes extra =
+  mempty
+    { subtaskIncludes = Map.singleton name includes,
+      subtasks = singleton name
+    }
+    <> case extra of
+      [] -> mempty
+      _ ->
+        mempty
+          { testsets = Map.singleton ("subtask-" <> name) extra,
+            subtaskIncludes = Map.singleton name ["subtask-" <> name]
+          }
 
+-- | Threads the StdGen through all the tests.
+seedTests :: StdGen -> UnseededTests a -> Tests a
+seedTests s tests = tests { testsets = fst (runGen everything s) }
   where
-    compileSolution = \case
-      SolutionHs {} -> pure True
-      SolutionExt {name, compileCmds} -> do
-        putStrLn $ "-- " <> name
-        handle @IOError (const $ putStrLn "-- compilation failed" >> pure False) do
-          forM_ compileCmds (uncurry callProcess)
-          pure True
+    everything = traverse sequenceA tests.testsets
 
-    runSolutionOnTest testName i = \case
-      SolutionHs {f} ->
-        handle @SomeException (pure . Left . RE . show) $
-          maybe (Left TLE) Right <$> timeout timeLimit (evaluate . force =<< f i)
+-- | The list of tests with their unique names
+-- /Tests that are never referenced from subtasks are ignored./
+--
+-- ==== __Examples:__
+-- 
+-- >>> t1 = testset "a" [pure "a1", pure "a2"]
+-- >>> t2 = testset "b" [pure "b1", pure "b2"]
+-- >>> s = subtask "full" ["b", "a"] [pure "x"]
+-- >>> allTests $ seedTests undefined $ t1 <> t2 <> s
+-- [("0-b-0","b1"),("0-b-1","b2"),("1-a-0","a1"),("1-a-1","a2"),("2-subtask-full-0","x")]
+-- 
+-- 
+allTests :: Tests a -> [(String, a)]
+allTests tests = do
+  let allTestsets = unique $ concatMap (tests.subtaskIncludes Map.!) tests.subtasks
+  (seti, setname) <- zip [0 ..] allTestsets
+  (testi, test) <- zip [0 ..] $ tests.testsets Map.! setname
+  pure (show seti <> "-" <> setname <> "-" <> show testi, test)
+  where
+    unique xs = reverse . snd $ foldl' (\(s, r) x -> if Set.member x s then (s, r) else (Set.insert x s, x : r)) (mempty, mempty) xs
 
-      SolutionExt {name, runCmd = (cmd, args)} -> do
-        withTempFile "tmp/" (testName <> ".out") \outPath hOut -> do
-          code <- withFile ("tests/" <> testName <> ".in") ReadMode \hIn -> do
-            let timeoutString = show (fromIntegral (round (fromIntegral timeLimit / 1000)) / 1000) <> "s"
-            withCreateProcess
-              -- GNU coreutils https://www.gnu.org/software/coreutils/timeout
-              (proc "timeout" $ ["--signal=KILL", timeoutString, cmd] <> args)
-                { delegate_ctlc = False,
-                  std_in = UseHandle hIn,
-                  -- hOut is closed here
-                  std_out = UseHandle hOut
-                }
-              \_ _ _ p -> waitForProcess p
-          case code of
-            -- timeout
-            ExitFailure 124 -> do
-              pure $ Left TLE
-            ExitFailure 125 -> do
-              pure $ Left $ RE "timeout command returned 125"
-            ExitFailure code -> do
-              pure $ Left $ RE $ "exit code " <> show code
-            ExitSuccess -> do
-              output <- B.readFile outPath
-              pure $ case printerO.fromPrinted ((i, def), output) of
-                Nothing -> Left PE
-                Just ((_, o), _) -> Right o
 
-    evaluateOutput testName i a o =
-        pure $ case o of
-          Left e -> (Bad e, (testName, i, a, Nothing))
-          Right o
-            | check i a o -> (ac, (testName, i, a, Just o))
-            | otherwise -> (wa, (testName, i, a, Just o))
+data Verdict
+  -- | the solution was graded successfully. Must be between 0 and 1
+  = Pts Float
+  -- | there was an error
+  | Bad VerdictBad
+  deriving (Show, Eq)
+
+data VerdictBad
+  -- | output couldn't be parsed
+  = PE
+  -- | runtime error with extra information
+  | RE String
+  -- | time limit exceeded
+  | TLE
+  -- | any other message to the user
+  | Other String
+  deriving (Show, Eq)
+
+-- | Zero points. @Pts 0@
+wa :: Verdict
+wa = Pts 0
+
+-- | Full points. @Pts 1@
+ac :: Verdict
+ac = Pts 1
+
+-- | constructs a 'Pts' by clamping the points between 0 and 1
+mkPts :: Float -> Verdict
+mkPts x = Pts (0 `max` x `min` 1)
+
+-- | If 'Pts', gets the points, otherwise 0
+getPoints :: Verdict -> Float
+getPoints (Pts x) = x
+getPoints _ = 0
+
+-- | Whether it is 'Pts' and greater than zero
+hasPoints :: Verdict -> Bool
+hasPoints x = getPoints x > 0
+
+-- | Return the argument which has smaller points. If an error, returns the left-most one.
+mergeVerdict' :: (Verdict, b) -> (Verdict, b) -> (Verdict, b)
+mergeVerdict' a b = case (a, b) of
+  ((Pts x, _), (Pts y, _))
+    | x < y -> a
+    | otherwise -> b
+  ((Pts _, _), _) -> b
+  (_, (Pts _, _)) -> a
+  (_, _) -> a
+
+-- | Semigroup merging based on 'mergeVerdict\''
+instance Semigroup Verdict where
+  a <> b = fst $ mergeVerdict' (a, ()) (b, ())
+
+instance Monoid Verdict where
+  mempty = Pts 1

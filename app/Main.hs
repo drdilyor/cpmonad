@@ -98,4 +98,4 @@ model :: Input -> Output
 model = sol1
 
 main :: IO ()
-main = generateTests' p >> runSolutions p
+main = generateTests p >> runSolutions p
