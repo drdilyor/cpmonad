@@ -11,6 +11,7 @@ import Lens.Micro.TH
 import System.Random (mkStdGen)
 
 import Cpmonad
+import Cpmonad.Misc
 import Debug.Trace (traceShowId)
 
 data Input = Input
@@ -37,7 +38,7 @@ tests =
         testset "n2" $
           replicate 10 (gen2 2000 2000),
         testset "big" $
-          replicate 3 (gen2 200000 200000),
+          replicate 20 (gen2 500_000 500_000),
         subtask "n3" ["manual", "n3"] [ gen1 400 100 ],
         subtask "n2" ["manual", "n3", "n2"] [],
         subtask "full" ["manual", "n3", "n2", "big"] []
@@ -61,7 +62,8 @@ p =
                 <> pvec endl queries (pint _1 <> sp <> pint _2),
       printerO = pvecintN sp (_1 . queries . len) _2,
       printerA = pvecintN endl (_1 . queries . len) _2,
-      timeLimit = 100_000
+      threads = 11,
+      timeLimit = 1_000_000
     }
 
 

@@ -79,6 +79,8 @@ common dependencies
                     , data-default
                     , process
                     , temporary
+                    , async
+                    , stm
 
 
 library
@@ -92,6 +94,7 @@ executable exe
     main-is: Main.hs
     build-depends: cpmonad
     hs-source-dirs: app
+    ghc-options: -threaded
 
 test-suite test
     import: ghc, dependencies

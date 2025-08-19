@@ -1,6 +1,8 @@
 {-# LANGUAGE NoFieldSelectors #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 {-# OPTIONS_GHC -Wno-type-defaults #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use replicateM_" #-}
 
 module Cpmonad(
   VerdictBad(..),
@@ -47,6 +49,8 @@ import Data.Maybe (fromJust)
 import Data.Set qualified as Set
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Vector qualified as V
+import Data.Vector.Mutable qualified as VM
 import GHC.Generics (Generic)
 import System.CPUTime
 import System.Directory
@@ -61,12 +65,14 @@ import Cpmonad.Gen
 import Cpmonad.Printer
 import Cpmonad.Misc
 import System.Random (StdGen, mkStdGen)
-import Data.Semigroup
+import Control.Concurrent
+import Data.IORef
+import Control.Applicative ((<|>))
 
 -- Pts x where x must be between 0 and 1
-data Verdict = Pts Float | Bad VerdictBad deriving (Show)
+data Verdict = Pts Float | Bad VerdictBad deriving (Show, Eq)
 
-data VerdictBad = PE | RE String | TLE | Other String deriving (Show)
+data VerdictBad = PE | RE String | TLE | Other String deriving (Show, Eq)
 
 wa :: Verdict
 wa = Pts 0
@@ -111,6 +117,7 @@ data Problem i a o where
       printerI :: Printer i,
       printerA :: Printer (i, a),
       printerO :: Printer (i, o),
+      threads :: Int,
       timeLimit :: Int
     } ->
     Problem i a o
@@ -203,6 +210,7 @@ cpp name =
 
 wrapAction :: String -> IO a -> IO a
 wrapAction name step = do
+  -- TODO: fix the time, use wall time
   putStrLn $ ":: " <> name <> " ..."
   start <- getCPUTime
   res <- step
@@ -210,6 +218,62 @@ wrapAction name step = do
   let diffms = (round :: Double -> Int) $ fromIntegral (end - start) / (10 ^ (9 :: Int))
   putStrLn $ "   took " <> show diffms <> "ms"
   pure res
+
+-- we use explicit semaphores because otherwise multiple greenthreads will be interleaved on a single core,
+-- which will lead to TLEs because `timeout` considers total wall time
+parallelPooled :: Int -> (V.Vector (Maybe a) -> IO ()) -> [IO a] -> IO [a]
+parallelPooled n onProgress actions = do
+  sem <- newQSem n
+  results <- VM.replicate (length actions) Nothing
+  hasProgress <- newEmptyMVar
+  anError <- newIORef Nothing
+  channel <- newChan
+  onProgress =<< V.freeze results
+
+  let debug = False
+  forM_ (zip [0..] actions) $ \(i, action) -> forkIO $ do
+    result <- try @SomeException $ bracket_ (waitQSem sem) (signalQSem sem) $ do
+      when debug do
+        putStrLn $ ">> " <> show i
+        hFlush stdout
+      x <- action >>= evaluate
+      when debug do
+        putStrLn $ "-- " <> show i
+        hFlush stdout
+      pure x
+    writeChan channel (i, result)
+
+  let progressThread = do
+        () <- takeMVar hasProgress
+        onProgress =<< V.freeze results
+        threadDelay 200_000
+        progressThread
+
+  bracket (forkIO progressThread) killThread \_ -> do
+    replicateM (length actions) do
+      (i, val) <- readChan channel
+      case val of
+        Left e -> modifyIORef' anError (<|> Just e)
+        Right x -> do
+          VM.write results i $ Just x
+          void $ tryPutMVar hasProgress ()
+
+    onProgress =<< V.freeze results
+    readIORef anError >>= \case
+      Just e -> throwIO e
+      _ -> V.toList . V.map fromJust <$> V.freeze results
+
+progressBar :: V.Vector (Maybe a) -> IO ()
+progressBar v = do
+  putStr $ "\r   " <> map (\case Just _ -> '.'; Nothing -> ' ') (V.toList v)
+  hFlush stdout
+
+progressCounter :: V.Vector (Maybe a) -> IO ()
+progressCounter v = do
+  putStr $ "\r   " <> show doneCount <> "/" <> show (V.length v)
+  hFlush stdout
+  where
+    doneCount = V.sum $ V.map (\case Just _ -> 1; Nothing -> 0) v
 
 cleanDirectory :: FilePath -> IO ()
 cleanDirectory dir = do
@@ -222,11 +286,12 @@ generateTests' :: Problem i a o -> IO ()
 generateTests' Problem {..} = do
   wrapAction "cleaning up" $ cleanDirectory "tests"
 
-  _ <- wrapAction "evaluating tests" $ evaluate $ force tests
-
+  _ <- wrapAction "evaluating tests" $ do
+    parallelPooled threads progressCounter $ map (evaluate . force) $ concat $ Map.elems tests.testsets
+    putStrLn ""
 
   wrapAction "outputting tests" do
-    forM_ (allTests tests) \(testName, (i, a)) -> do
+    parallelPooled threads progressCounter $ flip map (allTests tests) \(testName, (i, a)) -> do
       h <- openBinaryFile ("tests/" <> testName <> ".in") WriteMode
       hSetBuffering h (BlockBuffering $ Just 4096)
       B.hPutBuilder h . fromJust $ printerI.toPrinted i
@@ -236,33 +301,76 @@ generateTests' Problem {..} = do
       hSetBuffering h (BlockBuffering $ Just 4096)
       B.hPutBuilder h . fromJust $ printerA.toPrinted (i, a)
       hClose h
+    putStrLn ""
 
   wrapAction "parsing outputs" do
-    forM_ (allTests tests) \(testName, _) -> do
-      -- TODO
+    parallelPooled threads progressCounter $ flip map (allTests tests) \(testName, (i, a)) -> do
       s <- B.readFile ("tests/" <> testName <> ".in")
-      let i = fst . fromJust $ printerI.fromPrinted (def, s)
-      s <- B.readFile ("tests/" <> testName <> ".out")
-      let a = fst <$> printerA.fromPrinted ((i, def), s)
-      _ <- evaluate $ force (i, a)
-      pure ()
+      i' <- evaluate . force $ printerI.fromPrinted (def, s)
+      case i' of
+        Nothing -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: failed to parse input"
+        Just (i', _) | i' /= i -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: parsed input is different from original"
+        Just (i', _) -> do
+          s <- B.readFile ("tests/" <> testName <> ".out")
+          a' <- evaluate . force $ printerA.fromPrinted ((i', def), s)
+          case a' of
+            Nothing -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: failed to parse input"
+            Just ((_, a'), _) | a' /= a -> throwIO $ AssertionFailed $ "tests/" <> testName <> ".in: parsed input is different from original"
+            Just _ -> pure ()
+    putStrLn ""
 
-  -- only for checking the performance of the printer itself
-  wrapAction "transcoding tests" do
-    forM_ (allTests tests) \(_, (i, a)) -> do
-      let i' = fmap fst . printerI.fromPrinted . (def,) . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i
-      let a' = do i <- i'
-                  fmap (snd . fst) . printerA.fromPrinted . ((i, def),) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)
-      when (i' /= Just i) $ putStrLn "input didn't match!!!"
-      when (a' /= Just a) $ putStrLn "aux didn't match!!!"
+  -- TODO: move this garbage out of here
+  let debug = False
+  when debug do
+    -- only for checking the performance of the printer itself
+    wrapAction "transcoding tests" do
+      forM_ (allTests tests) \(_, (i, a)) -> do
+        let i' = fmap fst . printerI.fromPrinted . (def,) . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i
+        let a' = i' >>= \i -> fmap (snd . fst) . printerA.fromPrinted . ((i, def),) . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)
+        i' `deepseq` a' `deepseq` pure ()
 
 runSolutions :: Problem i a o -> IO ()
 runSolutions Problem {..} = do
   -- TODO: parallelize. requires reworking
-  -- TODO: fix the time, it shows "took 0ms"
   sols <- wrapAction "compiling" do
     cleanDirectory "tmp"
-    flip filterM sols \case
+    filterM compileSolution sols
+
+  verdicts <- wrapAction "running" do
+    forM sols \sol -> do
+      let onProgress xs = do
+            putStr ("\r" <> "sol " <> sol.name <> ": " <> status)
+            hFlush stdout
+            where
+              status = flip map (V.toList xs) $ \case
+                Nothing -> ' '
+                Just (Bad e, _) -> case e of TLE -> 'T'; RE _ -> 'R'; PE -> 'P'; Other _ -> 'O'
+                Just (pts, _) -> if hasPoints pts then '.' else 'X'
+
+      results <- parallelPooled threads onProgress $ flip map (allTests tests) \(testName, (i, a)) -> do
+        o <- runSolutionOnTest testName i sol
+        evaluateOutput testName i a o
+      putStrLn ""
+      pure $ foldl1' mergeVerdict' results
+
+  wrapAction "evaluating" do
+    forM_ (zip sols verdicts) \case
+      (sol, (Pts x, _)) | x > 0 -> do
+        putStrLn $ "sol " <> sol.name <> ": Pts " <> show (round (x * 100) :: Int) <> "%"
+      (sol, (verdict, (testName, i, _, o))) -> do
+        let readFileHead f = withFile f ReadMode $ flip B.hGetSome 100
+        putStrLn $ "sol " <> sol.name <> ": " <> case verdict of { Pts _ -> "WA"; Bad x -> show x } <> ":"
+
+        input <- readFileHead ("tests/" <> testName <> ".in")
+        B.putStrLn $ ">>> input:\n" <> input <> "\n"
+        judgeOutput <- readFileHead ("tests/" <> testName <> ".out")
+        B.putStrLn $ ">>> judge output:\n" <> judgeOutput <> "\n"
+        case o of
+          Just o -> B.putStrLn $ ">>> output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerO.toPrinted (i, o)) <> "\n"
+          _ -> pure ()
+
+  where
+    compileSolution = \case
       SolutionHs {} -> pure True
       SolutionExt {name, compileCmds} -> do
         putStrLn $ "-- " <> name
@@ -270,62 +378,41 @@ runSolutions Problem {..} = do
           forM_ compileCmds (uncurry callProcess)
           pure True
 
-  verdicts <- wrapAction "running" do
-    forM sols \sol -> do
-      putStr $ "sol " <> sol.name <> ": "
-      verdict <-
-        foldl1' mergeVerdict' <$> forM (allTests tests) \(testName, (i, a)) -> do
-          (o' :: Either VerdictBad o) <- case sol of
+    runSolutionOnTest testName i = \case
+      SolutionHs {f} ->
+        handle @SomeException (pure . Left . RE . show) $
+          maybe (Left TLE) Right <$> timeout timeLimit (evaluate . force =<< f i)
 
-            SolutionHs {f} ->
-              handle @SomeException (pure . Left . RE . show) $
-                maybe (Left TLE) Right <$> timeout timeLimit (evaluate . force =<< f i)
+      SolutionExt {name, runCmd = (cmd, args)} -> do
+        withTempFile "tmp/" (testName <> ".out") \outPath hOut -> do
+          code <- withFile ("tests/" <> testName <> ".in") ReadMode \hIn -> do
+            let timeoutString = show (fromIntegral (round (fromIntegral timeLimit / 1000)) / 1000) <> "s"
+            withCreateProcess
+              -- GNU coreutils https://www.gnu.org/software/coreutils/timeout
+              (proc "timeout" $ ["--signal=KILL", timeoutString, cmd] <> args)
+                { delegate_ctlc = False,
+                  std_in = UseHandle hIn,
+                  -- hOut is closed here
+                  std_out = UseHandle hOut
+                }
+              \_ _ _ p -> waitForProcess p
+          case code of
+            -- timeout
+            ExitFailure 124 -> do
+              pure $ Left TLE
+            ExitFailure 125 -> do
+              pure $ Left $ RE "timeout command returned 125"
+            ExitFailure code -> do
+              pure $ Left $ RE $ "exit code " <> show code
+            ExitSuccess -> do
+              output <- B.readFile outPath
+              pure $ case printerO.fromPrinted ((i, def), output) of
+                Nothing -> Left PE
+                Just ((_, o), _) -> Right o
 
-            SolutionExt {name, runCmd = (cmd, args)} -> do
-              withTempFile "tmp/" (testName <> ".out") \outPath hOut -> do
-                code <- withFile ("tests/" <> testName <> ".in") ReadMode \hIn -> do
-                  let timeoutString = show (fromIntegral (round (fromIntegral timeLimit / 1000)) / 1000) <> "s"
-                  withCreateProcess
-                    -- GNU coreutils https://www.gnu.org/software/coreutils/timeout
-                    (proc "timeout" $ ["--signal=KILL", timeoutString, cmd] <> args)
-                      { delegate_ctlc = False,
-                        std_in = UseHandle hIn,
-                        -- hOut is closed here
-                        std_out = UseHandle hOut
-                      }
-                    \_ _ _ p -> waitForProcess p
-                case code of
-                  -- timeout
-                  ExitFailure 124 -> do
-                    pure $ Left TLE
-                  ExitFailure 125 -> do
-                    pure $ Left $ RE "timeout command returned 125"
-                  ExitFailure code -> do
-                    pure $ Left $ RE $ "exit code " <> show code
-                  ExitSuccess -> do
-                    output <- B.readFile outPath
-                    pure $ case printerO.fromPrinted ((i, def), output) of
-                      Nothing -> Left PE
-                      Just ((_, o), _) -> Right o
-          case o' of
-            Left e -> do
-              putStr (case e of TLE -> "T"; RE _ -> "R"; PE -> "P"; Other _ -> "O")
-              pure (Bad e, (i, a, Nothing))
-            Right o ->
-              if check i a o
-                then putStr "." >> pure (ac, (i, a, Just o))
-                else putStr "X" >> pure (wa, (i, a, Just o))
-      putStrLn ""
-      pure verdict
-
-  wrapAction "evaluating" do
-    forM_ (zip sols verdicts) \case
-      (sol, (Pts x, _)) | x > 0 -> do
-        putStrLn $ "sol " <> sol.name <> ": Pts " <> show (round (x * 100) :: Int) <> "%"
-      (sol, (verdict, (i, a, o))) -> do
-        putStrLn $ "sol " <> sol.name <> ": " <> case verdict of { Pts _ -> "WA"; Bad x -> show x } <> ":"
-        B.putStrLn $ ">>> input:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerI.toPrinted i) <> "\n"
-        case o of
-          Just o -> B.putStrLn $ ">>> output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerO.toPrinted (i, o)) <> "\n"
-          _ -> pure ()
-        B.putStrLn $ ">>> judge output:\n" <> (B.take 100 . B.toStrict . B.toLazyByteString . fromJust $ printerA.toPrinted (i, a)) <> "\n"
+    evaluateOutput testName i a o =
+        pure $ case o of
+          Left e -> (Bad e, (testName, i, a, Nothing))
+          Right o
+            | check i a o -> (ac, (testName, i, a, Just o))
+            | otherwise -> (wa, (testName, i, a, Just o))
