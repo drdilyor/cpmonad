@@ -5,6 +5,7 @@ import Prelude hiding (print)
 import Data.ByteString.Builder qualified as B
 import Data.ByteString.Char8 qualified as B
 import Data.ByteString.Char8(ByteString)
+import Data.Default
 import Data.List (intersperse)
 import Data.String (IsString)
 import Data.Vector qualified as V
@@ -34,8 +35,8 @@ spec = do
       parse " 42  " `shouldBe` Just (42, "  ")
 
   describe "pvecint" do
-    let print n v = toPrinted' (pvecint sp _1 _2) (n, v)
-    let parse n s = do ((_, v), s') <- (pvecint sp _1 _2).fromPrinted ((n, V.empty), s)
+    let print n v = toPrinted' (pvecintN sp _1 _2) (n, v)
+    let parse n s = do ((_, v), s') <- (pvecintN sp _1 _2).fromPrinted ((n, def), s)
                        pure (v, s')
 
     prop "fromPrinted is inverse of toPrinted" $
@@ -49,10 +50,10 @@ spec = do
 
 
   describe "large parser" do
-    let p = pint _1 <> sp <> pint _2 <> endl
+    let p = (pint _1 <> sp <> pint _2 <> endl)
             <> pvecvecint _1 _2 _3
-            <> pint _4 <> endl
-            <> pvec endl _4 _5 (0, 0) (pint _1 <> sp <> pint _2)
+            <> (pint _4 <> endl)
+            <> pvecN endl _4 _5 (pint _1 <> sp <> pint _2)
     let print = toPrinted' p
     let parse s = p.fromPrinted ((0, 0, V.empty, 0, V.empty), s)
 

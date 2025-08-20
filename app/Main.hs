@@ -4,11 +4,15 @@
 {-# HLINT ignore "Monoid law, left identity" #-}
 module Main where
 
+import Control.DeepSeq
 import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
+import Data.Default
+import Data.ByteString.Char8 qualified as B
 import Lens.Micro
 import Lens.Micro.TH
 import System.Random (mkStdGen)
+import GHC.Generics
 
 import Cpmonad
 import Cpmonad.Misc
@@ -44,6 +48,8 @@ tests =
         subtask "full" ["manual", "n3", "n2", "big"] []
       ]
 
+threads = 12
+
 p :: Problem Input Output Output
 p =
   Problem
@@ -62,7 +68,6 @@ p =
                 <> pvec endl queries (pint _1 <> sp <> pint _2),
       printerO = pvecintN sp (_1 . queries . len) _2,
       printerA = pvecintN endl (_1 . queries . len) _2,
-      threads = 11,
       timeLimit = 1_000_000
     }
 
@@ -97,5 +102,17 @@ gen2 = gen1
 model :: Input -> Output
 model = sol1
 
-main :: IO ()
-main = generateTests p >> runSolutions p
+main' :: IO ()
+main' = generateTests threads p >> runSolutions threads p
+
+data Input1 = Input1 {_k :: Int, _arr1 :: Vector Int, _queries1 :: Vector (Int, Int)}
+  deriving (Show, Eq, Generic, NFData, Default)
+makeLenses ''Input1
+printer = pint (arr1 . len) <> sp <> pint k <> endl
+  <> pvec sp arr1 (pint id) <> endl
+  <> pint (queries1 . len)
+  <> pvec endl queries1 (pint _1 <> sp <> pint _2) <> endl
+
+main = print $ fst <$> (pint _1 <> pvecN sp _1 _2 (pint id) :: Printer (Int, Vector Int)).fromPrinted (def, "5 1 2 3 40 500")
+  
+

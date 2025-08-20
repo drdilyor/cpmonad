@@ -388,11 +388,13 @@ type UnseededTests a = Tests (Gen a)
 
 instance Show (Tests a) where
   show Tests{..} =
-    "Tests"
-      <> (" {testsets = " <> show (([] :: [()]) <$ testsets))
-      <> (", subtaskIncludes = " <> show subtaskIncludes)
-      <> (", subtasks = " <> show subtasks)
-      <> "}"
+    mconcat
+      [ "Tests"
+      , " {testsets = " <> show (([] :: [()]) <$ testsets)
+      , ", subtaskIncludes = " <> show subtaskIncludes
+      , ", subtasks = " <> show subtasks
+      , "}"
+      ]
 
 instance Semigroup (Tests a) where
   a <> b =
