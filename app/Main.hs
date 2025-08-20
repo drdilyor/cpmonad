@@ -102,17 +102,5 @@ gen2 = gen1
 model :: Input -> Output
 model = sol1
 
-main' :: IO ()
-main' = generateTests threads p >> runSolutions threads p
-
-data Input1 = Input1 {_k :: Int, _arr1 :: Vector Int, _queries1 :: Vector (Int, Int)}
-  deriving (Show, Eq, Generic, NFData, Default)
-makeLenses ''Input1
-printer = pint (arr1 . len) <> sp <> pint k <> endl
-  <> pvec sp arr1 (pint id) <> endl
-  <> pint (queries1 . len)
-  <> pvec endl queries1 (pint _1 <> sp <> pint _2) <> endl
-
-main = print $ fst <$> (pint _1 <> pvecN sp _1 _2 (pint id) :: Printer (Int, Vector Int)).fromPrinted (def, "5 1 2 3 40 500")
-  
-
+main :: IO ()
+main = generateTests threads p >> runSolutions threads p

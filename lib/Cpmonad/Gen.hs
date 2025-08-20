@@ -1,56 +1,62 @@
-module Cpmonad.Gen(
+module Cpmonad.Gen (
   Gen,
   GenST,
   runGen,
   runGenST,
   liftg,
   runIOGen,
-
   genr,
   genri,
-  Indexable(..),
+  Indexable (..),
   choose,
   genpair,
   distribute,
   shuffle,
   genperm,
   gendistinct,
-  lift,
   state,
 ) where
 
 import Control.Monad.ST
-import Control.Monad.State.Strict (State, StateT, state, lift, runState, runStateT)
+import Control.Monad.State.Strict (State, StateT, lift, runState, runStateT, state)
 import Data.List
 import Data.Set qualified as Set
 import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
+import Data.Vector.Algorithms.Merge qualified as VA
 import Data.Vector.Mutable qualified as VM
 import Data.Vector.Strict qualified as VS
-import Data.Vector.Algorithms.Merge qualified as VA
-import System.Random (uniformR, StdGen, newStdGen)
+import System.Random (StdGen, newStdGen, uniformR)
 
+-- | Monad where usual generators live in
 type Gen = State StdGen
+
+-- | Monad when you want to do mutations for faster generation algorithms
 type GenST s = StateT StdGen (ST s)
 
 runGen :: Gen a -> StdGen -> (a, StdGen)
 runGen = runState
 
+-- | Convert 'GenST' to 'Gen'
 runGenST :: (forall s. GenST s a) -> Gen a
 runGenST g = state \s -> runST $ runStateT g s
 
 liftg :: Gen a -> GenST s a
 liftg = state . runState
 
+-- | Seed the generator with 'newStdGen'
 runIOGen :: Gen a -> IO a
 runIOGen g = fst . runGen g <$> newStdGen
 
+-- | Int between [a, b)
 genr :: Int -> Int -> Gen Int
-genr a b = state $ uniformR (a, b-1)
+genr a b = state $ uniformR (a, b - 1)
 
+-- | Int between [a, b]
 genri :: Int -> Int -> Gen Int
-genri a b = genr a (b-1)
+genri a b = genr a (b - 1)
 
+-- | Class of types that can be used with 'choose'
 class Indexable c where
   index :: c a -> Int -> a
   size :: c a -> Int
@@ -67,21 +73,40 @@ instance Indexable VS.Vector where
   index = (VS.!)
   size = VS.length
 
-choose :: Indexable c => c a -> Gen a
+-- | Choose an element of a collection
+choose :: (Indexable c) => c a -> Gen a
 choose xs = let n = size xs in index xs <$> genr 0 n
 
+-- | Keep generating until predicate returns True. Stops after one million tries
 genuntil :: (a -> Bool) -> Gen a -> Gen a
-genuntil p g = do
-  x <- g
-  if p x
-    then pure x
-    else genuntil p g
+genuntil p g = go (1000_000 :: Int)
+ where
+  go 0 = error "genuntil: not found after a million tries"
+  go i = do
+    x <- g
+    if p x
+      then pure x
+      else go (i - 1)
 
+{- | Generate a pair of integers satisfying the binary predicate f.
+
+Useful as @genpair (<=)@
+-}
 genpair :: (Int -> Int -> Bool) -> Gen Int -> Gen (Int, Int)
 genpair f g = genuntil (uncurry f) $ liftA2 (,) g g
 
-distribute :: Int -> Int -> Int -> Gen (Vector Int)
-distribute _ _ low | low < 0 = error "low must be non-negative"
+{- | Given @s@, generate @n@ numbers such that their sum adds up to @s@
+
+Can be used to generate the parameters of the testcases.
+-}
+distribute
+  :: Int
+  -- ^ total sum @s@
+  -> Int
+  -- ^ number of numbers @n@
+  -> Int
+  -- ^ minimum number to generate
+  -> Gen (Vector Int)
 distribute _ n _ | n <= 0 = error "n must be positive"
 distribute s n 0 = runGenST do
   v <- VM.generateM (n + 1) \i ->
@@ -94,6 +119,7 @@ distribute s n 0 = runGenST do
   pure $ V.zipWith (-) (V.drop 1 delimeters) delimeters
 distribute s n low = V.map (+ low) <$> distribute (s - low * n) n 0
 
+-- | Generate a shuffled version of the vector
 shuffle :: Vector Int -> Gen (Vector Int)
 shuffle v' = runGenST do
   let n = V.length v'
@@ -106,9 +132,11 @@ shuffle v' = runGenST do
   v <- V.thaw v'
   go v 0
 
+-- | Generate a permutation
 genperm :: Int -> Gen (Vector Int)
 genperm n = shuffle $ V.enumFromN 0 n
 
+-- | Generate n distinct @a@'s
 gendistinct :: (Ord a) => Int -> Gen a -> Gen (Vector a)
 gendistinct n g = runGenST do
   v <- VM.new n

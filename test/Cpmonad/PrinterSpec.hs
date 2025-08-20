@@ -29,8 +29,6 @@ spec = do
 
     prop "fromPrinted is inverse of toPrinted" $
       \x -> (print x >>= parse) `shouldBe` Just (x, "")
-    prop "toPrinted . fromPrinted is idemponent" $
-      \x -> (print x >>= parse >>= print . fst) `shouldBe` print x
     it "consumes whitespace correctly" do
       parse " 42  " `shouldBe` Just (42, "  ")
 
@@ -42,9 +40,6 @@ spec = do
     prop "fromPrinted is inverse of toPrinted" $
       \xs -> let v = V.fromList xs ; n = V.length v in
         (print n v >>= parse n) `shouldBe` Just (v, "")
-    prop "toPrinted . fromPrinted is idemponent" $
-      \xs -> let v = V.fromList xs ; n = V.length v in
-        (print n v >>= parse n >>= print n . fst) `shouldBe` print n v
     it "consumes whitespace correctly" do
       parse 2 " 1  \n  2  " `shouldBe` Just (V.fromList [1,2], "  ")
 
@@ -68,9 +63,6 @@ spec = do
 
     prop "fromPrinted is inverse of toPrinted" $ forAll input
       \x -> (print x >>= parse) == Just (x, "")
-
-    prop "toPrinted . fromPrinted is idemponent" $ forAll input
-      \x -> (print x >>= parse >>= print . fst) `shouldBe` print x
 
     it "consumes whitespace correctly" do
       parse " 1   2 \n 0   0 2  1 1  \n2   2  \n" `shouldBe` Just ((1, 2, V.singleton $ V.fromList [0, 0], 2, V.fromList [(1,1), (2,2)]), "  \n")

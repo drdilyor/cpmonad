@@ -2,20 +2,43 @@
 {-# OPTIONS_GHC -Wno-type-defaults #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
+{- |
+Module     : Cpmonad
+Description: Competitive programming problemsetting toolchain
+Copyright  : (c) drdilyor, 2025
+License    : MIT
+Stability  : experimental
+Portability: GNU/Linux
+
+Cpmonad (a typo of Comonad) is a set of tools for setting competitive programming
+problems. It features easy bidirectional parser/serializer, set of generators,
+and tools to automatically run the solutions on tests. There is no need to write
+checkers for input and output formats.
+
+This is very much an experiment. It only supports Batch problems, and doesn't
+yet support exporting to polygon or other formats.
+-}
 module Cpmonad (
+  -- * Problem
   Problem (..),
   generateTests,
   runSolutions,
+
+  -- * Solution
   Solution (..),
   hs,
   hsio,
   cpp,
+
+  -- * Tests
   Tests (..),
   UnseededTests,
   testset,
   subtask,
   seedTests,
   allTests,
+
+  -- * Verdict
   Verdict (..),
   VerdictBad (..),
   wa,
@@ -24,6 +47,8 @@ module Cpmonad (
   getPoints,
   hasPoints,
   mergeVerdict',
+
+  -- * Other modules
   module Cpmonad.Gen,
   module Cpmonad.Printer,
   module Cpmonad.Misc,
@@ -60,18 +85,18 @@ import Cpmonad.Printer
 import Data.IORef
 import System.Random (StdGen)
 
-{- | Central data specifying every part of the problem/task
+{- | Central data specifying every part of the problem/task.
 
 It has three type parameters:
 
 - @i@ is passed to solutions
 - @a@ is extra information stored with tests and passed onto grader.
-  @i@ is written as .in files, @a@ as .out files
 - @o@ is what solutions need to compute
 
+@i@ is written out as .in files, @a@ as .out files
+
 A problem requires 3 printers for each of the type parameters.
-A 'Printer' is a pair serializer and a deserializer.
-@printerA@/@printerO@ accepts @i@ to support parsing outputs that depend on input.
+'printerA'/'printerO' accepts @i@ to support parsing outputs that depend on input.
 
 Currently it only supports batch tasks.
 -}
@@ -332,14 +357,14 @@ hs name f = SolutionHs{name, f = pure . f}
 hsio :: String -> (i -> IO o) -> Solution i o
 hsio name f = SolutionHs{..}
 
--- | C++ solution with the file @\<name\>.cpp@ in the current directory and flags @-O2 and -Wall@.
+-- | C++ solution with the file @\<name\>.cpp@ in the current directory and flags @-O2 and -Wall@
 cpp
   :: String
   -- ^ name of the solution
   -> Solution i o
 cpp name = cpp' ["-O2", "-Wall"] (name <> ".cpp") name
 
--- | C++ solution with explicit path to the .cpp file and explicit compile-flags.
+-- | C++ solution with explicit path to the .cpp file and explicit compile-flags
 cpp'
   :: [String]
   -- ^ @g++@ flags
@@ -428,7 +453,7 @@ subtask name includes extra =
           , subtaskIncludes = Map.singleton name ["subtask-" <> name]
           }
 
--- | Threads the StdGen through all the tests.
+-- | Threads the StdGen through all the tests
 seedTests :: StdGen -> UnseededTests a -> Tests a
 seedTests s tests = tests{testsets = fst (runGen everything s)}
  where
@@ -455,6 +480,7 @@ allTests tests = do
  where
   unique xs = reverse . snd $ foldl' (\(s, r) x -> if Set.member x s then (s, r) else (Set.insert x s, x : r)) (mempty, mempty) xs
 
+-- | Verdict of a solution on a test
 data Verdict
   = -- | the solution was graded successfully. Must be between 0 and 1
     Pts Float
@@ -462,6 +488,7 @@ data Verdict
     Bad VerdictBad
   deriving (Show, Eq)
 
+-- | Verdict if there was an error running the solution
 data VerdictBad
   = -- | output couldn't be parsed
     PE
@@ -494,7 +521,7 @@ getPoints _ = 0
 hasPoints :: Verdict -> Bool
 hasPoints x = getPoints x > 0
 
--- | Return the argument which has smaller points. If an error, returns the left-most one.
+-- | Return the argument which has smaller points. If an error, returns the left-most one
 mergeVerdict' :: (Verdict, b) -> (Verdict, b) -> (Verdict, b)
 mergeVerdict' a b = case (a, b) of
   ((Pts x, _), (Pts y, _))

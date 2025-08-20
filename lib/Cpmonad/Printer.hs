@@ -1,17 +1,18 @@
 {-# OPTIONS_GHC -Wno-unused-imports #-}
 
+-- | Combinators for defining a parser and a serializer with a single definition
 module Cpmonad.Printer (
   Printer (..),
   char,
   sp,
   endl,
-  nest,
   pint,
   pvec,
   pvecN,
   pvecint,
   pvecintN,
   pvecvecint,
+  nest,
   len,
 ) where
 
@@ -26,7 +27,7 @@ import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as VM
 import Lens.Micro
 
-{- | A printer is both a serializer and a parser.
+{- | A printer is both a parser and a serializer.
 
 Parsing is done in an "FSM" fashion. Each parser gets the current state and
 updates it with the new information. The state is initialized to 'def'.
@@ -38,11 +39,11 @@ All of the builtin printers ignore extra whitespace.
 __Important__: the printers here, on their own, are valid — parser is
 an inverse of the serializer. But when combined, they can still become ambiguous.
 To prevent that, you must use whitespace when combining parsers. If I were to
-make pint output space, it would lead to trailing spaces in lines. Therefore,
-you need to choose between sp and endl explicit each time. @generateTests@
+make 'pint' output space, it would lead to trailing spaces in lines. Therefore,
+you need to choose between sp and endl explicit each time. 'generateTests'
 will check for this and will complain if your printer is invalid.
 
-The following characters are considered whitespace: @" \r\n"@
+The following characters are considered whitespace: @" \\r\\n"@
 
 ==== __Examples:__
 
@@ -190,7 +191,7 @@ pvecN
   -> Lens' a (Vector b)
   -- ^ the vector itself
   -> Printer b
- -> Printer a
+  -> Printer a
 pvecN sep n arr p = Printer{..}
  where
   toPrinted !x
