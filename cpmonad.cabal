@@ -3,13 +3,23 @@ cabal-version:      3.0
 name:               cpmonad
 version:            0.1.0.0
 
+synopsis:           Competitive programming problemsetting toolchain
+category:           Tools
 license:            MIT
 license-file:       LICENSE
 author:             drdilyor
+maintainer:         drdilyor <drdilyor@outlook.com>
+
+homepage:           https://github.com/drdilyor/cpmonad
+bug-reports:        https://github.com/drdilyor/cpmonad/issues
 
 build-type:         Simple
 extra-doc-files:    CHANGELOG.md
 extra-source-files:
+
+source-repository head
+  type: git
+  location: https://github.com/drdilyor/cpmonad
 
 common ghc
     ghc-options: -Wall -Wno-name-shadowing
