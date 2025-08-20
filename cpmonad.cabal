@@ -79,18 +79,14 @@ common dependencies
                     , vector-algorithms
                     , random
                     , optparse-applicative
-                    , free
                     , transformers
                     , mtl
                     , microlens
                     , microlens-th
                     , directory
-                    , attoparsec
                     , data-default
                     , process
                     , temporary
-                    , async
-                    , stm
 
 
 library
@@ -117,7 +113,6 @@ test-suite test
           cpmonad
         , hspec
         , hspec-contrib
-        , hspec-discover
         , QuickCheck
         , HUnit
 

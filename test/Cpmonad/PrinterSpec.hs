@@ -22,6 +22,7 @@ toPrinted' p x = B.toStrict . B.toLazyByteString <$> p.toPrinted x
 sepBySp :: IsString s => [s] -> Gen [s]
 sepBySp = sequence . intersperse (elements [" ", "  ", "   "]) . map pure
 
+spec :: Spec
 spec = do
   describe "pint" do
     let print = toPrinted' (pint id)
