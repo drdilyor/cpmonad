@@ -40,7 +40,7 @@ __Important__: the printers here, on their own, are valid — parser is
 an inverse of the serializer. But when combined, they can still become ambiguous.
 To prevent that, you must use whitespace when combining parsers. If I were to
 make 'pint' output space, it would lead to trailing spaces in lines. Therefore,
-you need to choose between sp and endl explicit each time. 'generateTests'
+you need to choose between sp and endl explicit each time. 'Cpmonad.generateTests'
 will check for this and will complain if your printer is invalid.
 
 The following characters are considered whitespace: @" \\r\\n"@

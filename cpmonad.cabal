@@ -3,8 +3,17 @@ cabal-version:      3.0
 name:               cpmonad
 version:            0.1.0.0
 
-synopsis:           Competitive programming problemsetting toolchain
 category:           Tools
+synopsis:           Competitive programming problemsetting toolchain
+description:
+    Cpmonad (a typo of Comonad) is a set of tools for setting competitive programming
+    problems. It features easy bidirectional parser/serializer, set of generators,
+    and tools to automatically run the solutions on all tests. There is no need to
+    write checkers for input and output formats.
+
+    This is very much an experiment. It only supports Batch problems, and doesn't
+    yet support exporting to polygon or other formats.
+
 license:            MIT
 license-file:       LICENSE
 author:             drdilyor
@@ -19,7 +28,7 @@ extra-source-files:
 
 source-repository head
   type: git
-  location: https://github.com/drdilyor/cpmonad
+  location: https://github.com/drdilyor/cpmonad.git
 
 common ghc
     ghc-options: -Wall -Wno-name-shadowing
@@ -70,37 +79,34 @@ common ghc
     default-language: GHC2021
 
 common dependencies
-    
-    build-depends:    base ^>=4.18.2.1
-                    , bytestring
-                    , containers
-                    , deepseq
-                    , vector
-                    , vector-algorithms
-                    , random
-                    , optparse-applicative
-                    , transformers
-                    , mtl
-                    , microlens
-                    , microlens-th
-                    , directory
-                    , data-default
-                    , process
-                    , temporary
 
+-- TODO: weaken the ranges
+    build-depends:
+        base ^>=4.18.2.1,
+        bytestring >= 0.11.5 && < 0.12,
+        deepseq >= 1.4.8 && < 1.5,
+        containers >= 0.6.7 && < 0.7,
+        data-default >= 0.8.0 && < 0.9,
+        directory >= 1.3.8 && < 1.4,
+        mtl >= 2.3.1 && < 2.4,
+        transformers >= 0.6.1 && < 0.7,
+        microlens >= 0.4.14 && < 0.5,
+        microlens-th >= 0.4.3 && < 0.5,
+        optparse-applicative >= 0.18.1 && < 0.19,
+        process >= 1.6.19 && < 1.7,
+        random >= 1.2.1 && < 1.3,
+        temporary >= 1.3 && < 1.4,
+        vector >= 0.13.2 && < 0.14,
+        vector-algorithms >= 0.9.1 && < 0.10,
 
 library
     import:           ghc, dependencies
-
-    exposed-modules: Cpmonad, Cpmonad.Gen, Cpmonad.Misc, Cpmonad.Printer
+    exposed-modules:
+        Cpmonad,
+        Cpmonad.Gen,
+        Cpmonad.Printer,
+        Cpmonad.Misc,
     hs-source-dirs:   lib
-
-executable exe
-    import: ghc, dependencies
-    main-is: Main.hs
-    build-depends: cpmonad
-    hs-source-dirs: app
-    ghc-options: -threaded
 
 test-suite test
     import: ghc, dependencies
@@ -110,10 +116,10 @@ test-suite test
     other-modules: Cpmonad.PrinterSpec
 
     build-depends:
-          cpmonad
-        , hspec
-        , hspec-contrib
-        , QuickCheck
-        , HUnit
+        cpmonad,
+        hspec,
+        hspec-contrib,
+        QuickCheck,
+        HUnit,
 
     hs-source-dirs: test

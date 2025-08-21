@@ -12,8 +12,8 @@ Portability: GNU/Linux
 
 Cpmonad (a typo of Comonad) is a set of tools for setting competitive programming
 problems. It features easy bidirectional parser/serializer, set of generators,
-and tools to automatically run the solutions on tests. There is no need to write
-checkers for input and output formats.
+and tools to automatically run the solutions on all tests. There is no need to
+write checkers for input and output formats.
 
 This is very much an experiment. It only supports Batch problems, and doesn't
 yet support exporting to polygon or other formats.
@@ -96,7 +96,7 @@ It has three type parameters:
 @i@ is written out as .in files, @a@ as .out files
 
 A problem requires 3 printers for each of the type parameters.
-'printerA'/'printerO' accepts @i@ to support parsing outputs that depend on input.
+@printerA@/@printerO@ accepts @i@ to support parsing outputs that depend on input.
 
 Currently it only supports batch tasks.
 -}
@@ -338,7 +338,7 @@ The commands can use the @tmp@ directory in the current directory.
 
 /The names must be unique./
 
-'SolutionExt'\'s 'runCmd'\'s output will be redirected to a file.
+'SolutionExt'\'s @runCmd@\'s output will be redirected to a file.
 -}
 data Solution i o
   = SolutionHs {name :: String, f :: i -> IO o}

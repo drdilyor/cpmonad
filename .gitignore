@@ -23,5 +23,5 @@ cabal.project.local~
 .ghc.environment.*
 
 .direnv
-tests/*
-tmp/*
+**/tmp
+**/tests
