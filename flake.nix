@@ -1,5 +1,5 @@
 {
-  # This is a template created by `hix init`
+  # bare-bones environment with nix
   inputs.nixpkgs.url = "github:nixos/nixpkgs?ref=nixpkgs-unstable";
   outputs = { self, nixpkgs }:
     let
