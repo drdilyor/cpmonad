@@ -90,6 +90,8 @@ common dependencies
         directory,
         mtl,
         transformers,
+        lens,
+        generic-lens,
         microlens,
         microlens-th,
         optparse-applicative,

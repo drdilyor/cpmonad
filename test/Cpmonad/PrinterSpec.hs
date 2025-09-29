@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 module Cpmonad.PrinterSpec where
 
+import Control.Lens hiding (elements)
 import Prelude hiding (print)
 import Data.ByteString.Builder qualified as B
 import Data.ByteString.Char8 qualified as B
@@ -9,7 +10,6 @@ import Data.Default
 import Data.List (intersperse)
 import Data.String (IsString)
 import Data.Vector qualified as V
-import Lens.Micro
 import Test.Hspec
 import Test.Hspec.QuickCheck
 import Test.QuickCheck

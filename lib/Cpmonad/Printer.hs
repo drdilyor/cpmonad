@@ -16,6 +16,7 @@ module Cpmonad.Printer (
   len,
 ) where
 
+import Control.Lens
 import Control.Monad.ST (runST)
 import Cpmonad.Misc
 import Data.ByteString.Builder qualified as B
@@ -25,7 +26,6 @@ import Data.Default
 import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as VM
-import Lens.Micro
 
 {- | A printer is both a parser and a serializer.
 
@@ -186,7 +186,7 @@ pvecN
   :: (Default b)
   => (forall c. Printer c)
   -- ^ separator
-  -> SimpleGetter a Int
+  -> Getter a Int
   -- ^ number of elements
   -> Lens' a (Vector b)
   -- ^ the vector itself
@@ -222,13 +222,13 @@ pvecN sep n arr p = Printer{..}
 pvecint :: (forall b. Printer b) -> Lens' a (V.Vector Int) -> Printer a
 pvecint sep arr = pvec sep arr (pint id)
 
-pvecintN :: (forall b. Printer b) -> SimpleGetter a Int -> Lens' a (V.Vector Int) -> Printer a
+pvecintN :: (forall b. Printer b) -> Getter a Int -> Lens' a (V.Vector Int) -> Printer a
 pvecintN sep n arr = pvecN sep n arr (pint id)
 
 {- | This is a special parser for a matrix of integers. Each row is separated by newlines and
 each number in the row is separated by spaces.
 -}
-pvecvecint :: SimpleGetter a Int -> SimpleGetter a Int -> Lens' a (Vector (Vector Int)) -> Printer a
+pvecvecint :: Getter a Int -> Getter a Int -> Lens' a (Vector (Vector Int)) -> Printer a
 pvecvecint n m arr = Printer{..}
  where
   toPrinted !x
