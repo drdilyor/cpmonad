@@ -67,8 +67,6 @@ executable scratchpad
         transformers,
         lens,
         generic-lens,
-        microlens,
-        microlens-th,
         random,
         vector,
         vector-algorithms

@@ -92,8 +92,6 @@ common dependencies
         transformers,
         lens,
         generic-lens,
-        microlens,
-        microlens-th,
         optparse-applicative,
         process,
         random,
