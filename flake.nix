@@ -13,8 +13,17 @@
     perSystem = { system, pkgs, ... }:
       let
         hpkgs = pkgs.haskell.packages.ghc912;
+
+        cpmonad = pkgs.haskell.lib.overrideCabal (hpkgs.callCabal2nix "cpmonad" ./. { }) (old: {
+          doCheck = true;
+          doHaddock = false;
+          enableLibraryProfiling = false;
+          enableExecutableProfiling = false;
+        });
       in
       {
+        packages.default = cpmonad;
+
         devShells.default = pkgs.mkShell {
           packages = [
             pkgs.coreutils
