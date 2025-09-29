@@ -10,15 +10,20 @@
       "aarch64-darwin"
     ];
 
-    perSystem = { system, pkgs, ... }: {
-      devShells.default = pkgs.mkShell {
-        packages = with pkgs; [
-          coreutils
-          (haskellPackages.ghcWithPackages (pkgs: with pkgs; [ cabal-install ]))
-          ghcid
-          haskell-language-server
-        ];
+    perSystem = { system, pkgs, ... }:
+      let
+        hpkgs = pkgs.haskell.packages.ghc912;
+      in
+      {
+        devShells.default = pkgs.mkShell {
+          packages = [
+            pkgs.coreutils
+            hpkgs.ghc
+            hpkgs.cabal-install
+            hpkgs.ghcid
+            hpkgs.haskell-language-server
+          ];
+        };
       };
-    };
   };
 }
