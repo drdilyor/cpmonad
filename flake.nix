@@ -1,7 +1,9 @@
 {
   description = "Competitive programming problemsetting toolchain in Haskell";
+
   inputs.nixpkgs.url = "github:nixos/nixpkgs?ref=nixpkgs-unstable";
   inputs.flake-parts.url = "github:hercules-ci/flake-parts";
+
   outputs = inputs@{ flake-parts, nixpkgs, ... }: flake-parts.lib.mkFlake { inherit inputs; } {
     systems = [
       "x86_64-linux"
