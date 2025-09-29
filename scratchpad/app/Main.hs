@@ -1,32 +1,28 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# OPTIONS_GHC -Wno-type-defaults #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Monoid law, left identity" #-}
 module Main where
 
+import Control.Lens
 import Control.DeepSeq
+import Data.Generics.Labels ()
 import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
 import Data.Default
-import Data.ByteString.Char8 qualified as B
-import Lens.Micro
-import Lens.Micro.TH
 import System.Random (mkStdGen)
 import GHC.Generics
 
 import Cpmonad
-import Cpmonad.Misc
 import Debug.Trace (traceShowId)
 
 data Input = Input
-  { _arr :: Vector Int,
-    _queries :: Vector (Int, Int)
+  { arr :: Vector Int,
+    queries :: Vector (Int, Int)
   }
   deriving (Show, Eq, Generic, NFData, Default)
 
 type Output = Vector Int
-
-makeLenses ''Input
 
 tests :: Tests Input
 tests =
@@ -48,6 +44,7 @@ tests =
         subtask "full" ["manual", "n3", "n2", "big"] []
       ]
 
+threads :: Int
 threads = 12
 
 p :: Problem Input Output Output
@@ -62,12 +59,12 @@ p =
           cpp "test"
         ],
       check = const (==),
-      printerI = pint (arr . len) <> endl
-                <> pvec sp arr (pint id) <> endl
-                <> pint (queries . len) <> endl
-                <> pvec endl queries (pint _1 <> sp <> pint _2),
-      printerO = pvecintN sp (_1 . queries . len) _2,
-      printerA = pvecintN endl (_1 . queries . len) _2,
+      printerI = pint (#arr . len) <> endl
+                <> pvec sp #arr (pint id) <> endl
+                <> pint (#queries . len) <> endl
+                <> pvec endl #queries (pint _1 <> sp <> pint _2),
+      printerO = pvecintN sp (_1 . #queries . len) _2,
+      printerA = pvecintN endl (_1 . #queries . len) _2,
       timeLimit = 1_000_000
     }
 
