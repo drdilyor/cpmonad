@@ -1,13 +1,14 @@
 {
-  # bare-bones environment with nix
   inputs.nixpkgs.url = "github:nixos/nixpkgs?ref=nixpkgs-unstable";
-  outputs = { self, nixpkgs }:
-    let
-      system = "x86_64-linux";
-      pkgs = import nixpkgs { inherit system; };
-    in
-    {
-      devShells.${system}.default = pkgs.mkShell {
+  inputs.flake-parts.url = "github:hercules-ci/flake-parts";
+  outputs = inputs@{ flake-parts, nixpkgs, ... }: flake-parts.lib.mkFlake { inherit inputs; } {
+    systems = [
+      "x86_64-linux"
+      "aarch64-darwin"
+    ];
+
+    perSystem = { system, pkgs, ... }: {
+      devShells.default = pkgs.mkShell {
         packages = with pkgs; [
           coreutils
           (haskellPackages.ghcWithPackages (pkgs: with pkgs; [ cabal-install ]))
@@ -16,4 +17,5 @@
         ];
       };
     };
+  };
 }
