@@ -80,7 +80,6 @@ common ghc
 
 common dependencies
 
--- TODO: weaken the ranges
     build-depends:
         base,
         bytestring,
