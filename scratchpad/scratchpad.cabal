@@ -67,6 +67,7 @@ executable scratchpad
         transformers,
         lens,
         generic-lens,
+        haggle,
         random,
         vector,
         vector-algorithms

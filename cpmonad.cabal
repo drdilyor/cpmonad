@@ -98,6 +98,7 @@ common dependencies
         transformers >= 0.6.1 && < 0.7,
         vector >= 0.13.2 && < 0.14,
         vector-algorithms >= 0.9.1 && < 0.10,
+        haggle >= 0.3.1 && < 0.4
 
 
 library
