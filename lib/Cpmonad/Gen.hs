@@ -1,5 +1,3 @@
-{-# LANGUAGE NoFieldSelectors #-}
-
 module Cpmonad.Gen (
   Gen,
   GenST,
@@ -10,6 +8,7 @@ module Cpmonad.Gen (
   runIOGen,
   genr,
   genri,
+  genrw,
   Indexable (..),
   choose,
   genpair,
@@ -17,34 +16,19 @@ module Cpmonad.Gen (
   shuffle,
   genperm,
   gendistinct,
-  GraphOptions (..),
-  connected,
-  disconnected,
-  gentree,
-  treeFromPruferCode,
-  gengraph,
-  vi,
 ) where
 
 import Control.Monad
 import Control.Monad.ST
-import Control.Monad.State.Strict (State, StateT, lift, runState, runStateT, state)
-import Data.Coerce
-import Data.Graph.Haggle
-import Data.Graph.Haggle.BiDigraph
+import Control.Monad.State.Strict (State, StateT, runState, runStateT, state)
 import Data.List
-import Data.Maybe (fromJust)
-import Data.STRef
 import Data.Set qualified as Set
 import Data.Vector (Vector, (!))
 import Data.Vector qualified as V
 import Data.Vector.Algorithms.Merge qualified as VA
 import Data.Vector.Mutable qualified as VM
 import Data.Vector.Strict qualified as VS
-import Debug.Trace
-import GHC.Stack (HasCallStack)
 import System.Random (StdGen, newStdGen, uniformR)
-import Unsafe.Coerce (unsafeCoerce)
 
 -- | Monad where usual generators live in
 type Gen = State StdGen
@@ -73,6 +57,12 @@ genr a b = state $ uniformR (a, b - 1)
 -- | Int between [a, b]
 genri :: Int -> Int -> Gen Int
 genri a b = genr a (b - 1)
+
+genrw :: Int -> Int -> Int -> Gen Int
+genrw l r w
+  | w > 0 = maximum <$> replicateM w (genr l r)
+  | w < 0 = minimum <$> replicateM (-w) (genr l r)
+  | otherwise = genr l r
 
 -- | Class of types that can be used with 'choose'
 class Indexable c where
@@ -138,7 +128,7 @@ distribute s n 0 = runGenST do
 distribute s n low = V.map (+ low) <$> distribute (s - low * n) n 0
 
 -- | Generate a shuffled version of the vector
-shuffle :: Vector Int -> Gen (Vector Int)
+shuffle :: Vector a -> Gen (Vector a)
 shuffle v' = runGenST do
   let n = V.length v'
   let go v i
@@ -166,66 +156,3 @@ gendistinct n g = runGenST do
             go (i + 1) (Set.insert x seen) v
   go 0 Set.empty v
 
--- data Graph v e = Graph !(Vector v) !(Vector (Int, Int, e))
---   deriving (Eq, Show)
-
-data GraphOptions = GraphOptions
-  { connected :: Bool
-  , allowLoops :: Bool
-  , allowMulti :: Bool
-  , allowAntiparallel :: Bool
-  , acyclic :: Bool
-  }
-
-disconnected :: GraphOptions
-disconnected =
-  GraphOptions
-    { connected = False
-    , allowLoops = False
-    , allowMulti = False
-    , allowAntiparallel = False
-    , acyclic = False
-    }
-
-connected :: GraphOptions
-connected = disconnected{connected = False}
-
-gentree :: Int -> Gen BiDigraph
-gentree n = treeFromPruferCode <$> V.replicateM (n - 2) (genr 0 n)
-
-vi :: Int -> Vertex
-vi = unsafeCoerce
-
-treeFromPruferCode :: Vector Int -> BiDigraph
-treeFromPruferCode code = runST do
-  let n = V.length code + 2
-  g <- newSizedMBiDigraph n (n - 1)
-  degree <- VM.replicate n (1 :: Int)
-  leaves <- newSTRef Set.empty
-
-  V.forM_ code $ VM.modify degree (+ 1)
-  replicateM_ n $ addVertex g
-
-  forM_ [0 .. n - 1] \i -> do
-    di <- VM.read degree i
-    when (di == 1) $ modifySTRef' leaves (Set.insert (vi i))
-
-  let
-    go i leaves
-      | i == n - 2 =
-          void $ addEdge g (Set.findMin leaves) (Set.findMax leaves)
-    go i (Set.minView -> Just (leaf, leaves)) = do
-      let v = code V.! i
-      _ <- addEdge g leaf (vi v)
-      VM.modify degree (subtract 1) v
-      di <- VM.read degree v
-      go (i + 1) $ if di == 1 then Set.insert (vi v) leaves else leaves
-    go _ _ = error "infallible"
-  -- collect vertices with degree == 1
-  leaves <- VM.ifoldl' (\cases s i 1 -> Set.insert (vi i) s; s _ _ -> s) Set.empty degree
-  go 0 leaves
-
-  freeze g
-
-gengraph :: GraphOptions -> Digraph
-gengraph _ = undefined

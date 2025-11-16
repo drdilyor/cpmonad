@@ -106,6 +106,7 @@ library
     exposed-modules:
         Cpmonad,
         Cpmonad.Gen,
+        Cpmonad.Graph,
         Cpmonad.Printer,
         Cpmonad.Misc,
     hs-source-dirs:   lib
