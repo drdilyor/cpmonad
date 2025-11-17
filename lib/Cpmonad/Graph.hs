@@ -1,5 +1,34 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
+{-
+Copyright (c) 2025 drdilyor
+
+Some parts of this code has been translated from
+https://github.com/ifsmirnov/jngen with the following license:
+
+MIT License
+
+Copyright (c) 2016-2018 Ivan Smirnov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-}
+
 module Cpmonad.Graph (
   GraphOptions (..),
   connected,
@@ -21,6 +50,8 @@ module Cpmonad.Graph (
 import Control.Arrow (Arrow ((&&&)))
 import Control.Monad
 import Control.Monad.ST
+import Control.Monad.Trans
+import Data.Function
 import Data.Graph.Haggle
 import Data.Graph.Haggle.Classes (maxVertexId)
 import Data.STRef
@@ -34,6 +65,7 @@ import Cpmonad.Gen
 
 data GraphOptions = GraphOptions
   { connected :: Bool
+  , directed :: Bool
   , allowLoops :: Bool
   , allowMulti :: Bool
   , allowAntiparallel :: Bool
@@ -44,6 +76,7 @@ disconnected :: GraphOptions
 disconnected =
   GraphOptions
     { connected = False
+    , directed = False
     , allowLoops = False
     , allowMulti = False
     , allowAntiparallel = False
@@ -56,8 +89,42 @@ connected = disconnected{connected = False}
 vi :: Int -> Vertex
 vi = unsafeCoerce
 
-gengraph :: GraphOptions -> Digraph
-gengraph _ = undefined
+gengraph :: GraphOptions -> Int -> Int -> Gen Digraph
+gengraph GraphOptions{..} n m
+  | not connected && not directed && acyclic = error "gengraph doesn't have ability to generate forests!"
+  | connected && m < n - 1 = error "not enough edges for a connected graph"
+  | not allowMulti && m > maxEdges = error "too many edges in the graph"
+ where
+  maxEdges =
+    (n * (n - 1))
+      & applyWhen (directed && allowAntiparallel) (`div` 2)
+      & applyWhen allowLoops (+ n)
+gengraph GraphOptions{..} n m = runGenST do
+  resEdges <- lift $ newSTRef Set.empty
+  when connected do
+    tree <- liftg $ gentree n
+    forM_ (edges tree) \(edgeSource &&& edgeDest -> (a, b)) -> do
+      (a, b) <-
+        if not directed
+          then pure (a, b)
+          else (\case 0 -> (a, b); _ -> (b, a)) <$> liftg (genr 0 2)
+      lift $ modifySTRef' resEdges $ Set.insert (vertexId a, vertexId b)
+
+  let
+    go resEdges | Set.size resEdges == m = pure resEdges
+    go resEdges = do
+      edge <- liftg $ liftA2 (,) (genr 0 n) (genr 0 n)
+      if
+        | not allowLoops && fst edge == snd edge -> go resEdges
+        | not allowMulti && Set.member edge resEdges -> go resEdges
+        | directed && not allowAntiparallel && Set.member (snd edge, fst edge) resEdges -> go resEdges
+        | otherwise -> go (Set.insert edge resEdges)
+
+  resEdges' <- go =<< lift (readSTRef resEdges)
+  g <- newSizedMDigraph n m
+  replicateM_ n $ addVertex g
+  forM_ (Set.toList resEdges') \(a, b) -> addEdge g (vi a) (vi b)
+  freeze g
 
 gentree :: Int -> Gen SimpleBiDigraph
 gentree n = treeFromPruferCode <$> V.replicateM (n - 2) (genr 0 n)
