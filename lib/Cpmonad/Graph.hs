@@ -177,6 +177,7 @@ gentreeKruskal n = runGenST do
 lineTree :: Int -> SimpleBiDigraph
 lineTree n = runST do
   g <- newSizedMSimpleBiDigraph n (n - 1)
+  replicateM_ n $ addVertex g
   forM_ [0 .. n - 2] \i -> addEdge g (vi i) (vi $ i + 1)
   freeze g
 
