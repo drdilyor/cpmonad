@@ -50,6 +50,7 @@ module Cpmonad (
 
   -- * Other modules
   module Cpmonad.Gen,
+  module Cpmonad.Graph,
   module Cpmonad.Printer,
   module Cpmonad.Misc,
 ) where
@@ -80,6 +81,7 @@ import System.Timeout (timeout)
 import Control.Applicative ((<|>))
 import Control.Concurrent
 import Cpmonad.Gen
+import Cpmonad.Graph
 import Cpmonad.Misc
 import Cpmonad.Printer
 import Data.IORef
