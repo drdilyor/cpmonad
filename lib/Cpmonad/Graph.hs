@@ -63,6 +63,7 @@ import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as VM
 import Unsafe.Coerce (unsafeCoerce)
+import Debug.Trace
 
 import Cpmonad.Gen
 
@@ -175,7 +176,38 @@ gentreePrim n elongation = runGenST do
 
 gentreeKruskal :: Int -> Gen SimpleBiDigraph
 gentreeKruskal n = runGenST do
-  pure undefined
+  -- DSU
+  parent <- V.thaw $ V.enumFromN (0 :: Int) n
+  let
+    connected a b = (==) <$> get a <*> get b
+    get i = do
+      p <- VM.read parent i
+      if p == i
+      then pure i
+      else do
+        ans <- get p
+        VM.write parent i ans
+        pure ans
+    connect a b = do
+      ar <- get a
+      br <- get b
+      VM.write parent ar br
+
+  g <- newSizedMSimpleBiDigraph n (n - 1)
+  replicateM_ n $ addVertex g
+  replicateM_ (n - 1)  do
+    traceShowM =<< V.freeze parent
+    let
+      go = do
+        (a, b) <- liftg $ genpair (/=) (genr 0 n)
+        isconn <- connected a b
+        if isconn
+        then go
+        else do
+          void $ addEdge g (vi a) (vi b)
+          connect a b
+    go
+  freeze g
 
 lineTree :: Int -> SimpleBiDigraph
 lineTree n = runST do
