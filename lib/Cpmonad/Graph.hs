@@ -41,6 +41,8 @@ module Cpmonad.Graph (
   bambooTree,
   lineTree,
   starTree,
+  binaryTree,
+  karyTree,
   shuffleGraph,
   linkGraphs,
   glueGraphs,
@@ -194,11 +196,16 @@ starTree n = runST do
 gentreeCaterpillar :: Int -> Int -> Gen SimpleBiDigraph
 gentreeCaterpillar = error "TODO"
 
-binaryTree :: Int -> Int -> SimpleBiDigraph
-binaryTree = error "TODO"
+binaryTree :: Int -> SimpleBiDigraph
+binaryTree = karyTree 2
 
 karyTree :: Int -> Int -> SimpleBiDigraph
-karyTree = error "TODO"
+karyTree k n = runST do
+  g <- newSizedMSimpleBiDigraph n (n - 1)
+  replicateM_ n $ addVertex g
+  forM_ [1..n-1] \i ->
+    addEdge g (vi $ (i - 1) `div` k) (vi i)
+  freeze g
 
 -- TODO: generalize for more graph, generalize for labels
 shuffleGraph :: SimpleBiDigraph -> Gen SimpleBiDigraph
