@@ -41,6 +41,7 @@ module Cpmonad.Graph (
   bambooTree,
   lineTree,
   starTree,
+  gentreeCaterpillar,
   binaryTree,
   karyTree,
   shuffleGraph,
@@ -194,7 +195,13 @@ starTree n = runST do
   freeze g
 
 gentreeCaterpillar :: Int -> Int -> Gen SimpleBiDigraph
-gentreeCaterpillar = error "TODO"
+gentreeCaterpillar n l = runGenST do
+  g <- thaw $ lineTree l
+  replicateM_ (n - l) $ addVertex g
+  forM_ [l..n-1] \i -> do
+    p <- liftg $ genr 0 l
+    addEdge g (vi p) (vi i)
+  freeze g
 
 binaryTree :: Int -> SimpleBiDigraph
 binaryTree = karyTree 2
