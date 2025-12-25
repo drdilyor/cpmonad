@@ -11,6 +11,7 @@ module Cpmonad.Gen (
   genrw,
   Indexable (..),
   choose,
+  genuntil,
   genpair,
   distribute,
   shuffle,
@@ -56,7 +57,7 @@ genr a b = state $ uniformR (a, b - 1)
 
 -- | Int between [a, b]
 genri :: Int -> Int -> Gen Int
-genri a b = genr a (b - 1)
+genri a b = genr a (b + 1)
 
 genrw :: Int -> Int -> Int -> Gen Int
 genrw l r w
@@ -121,7 +122,7 @@ distribute s n 0 = runGenST do
     if
       | i == 0 -> pure 0
       | i == n -> pure s
-      | otherwise -> liftg (genr 0 s)
+      | otherwise -> liftg (genri 0 s)
   VA.sort v
   delimeters <- V.unsafeFreeze v
   pure $ V.zipWith (-) (V.drop 1 delimeters) delimeters
