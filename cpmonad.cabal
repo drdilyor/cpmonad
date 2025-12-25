@@ -116,7 +116,10 @@ test-suite test
     ghc-options: -Wno-missing-signatures
     type: exitcode-stdio-1.0
     main-is: Spec.hs
-    other-modules: Cpmonad.PrinterSpec
+    other-modules:
+        Cpmonad.TestUtil
+        Cpmonad.GenSpec
+        Cpmonad.PrinterSpec
 
     build-depends:
         cpmonad,
