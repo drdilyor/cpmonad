@@ -2,31 +2,36 @@
 
 module Cpmonad.GenSpec where
 
+import Control.Monad (replicateM)
+import Cpmonad.Gen hiding (choose, shuffle)
+import Cpmonad.Gen qualified
+import Cpmonad.TestUtil (covers)
+import Data.Containers.ListUtils (nubOrd)
 import Data.List (sort)
 import Data.Vector qualified as V
+
+-- import System.Random (mkStdGen)
 import Test.Hspec
 import Test.Hspec.QuickCheck
 import Test.QuickCheck hiding (Gen)
 import Prelude hiding (print)
 
-import Control.Monad (replicateM)
-import Cpmonad.Gen hiding (choose, shuffle)
-import Cpmonad.Gen qualified
-import Cpmonad.TestUtil ()
-import Data.Containers.ListUtils (nubOrd)
-import System.Random (mkStdGen)
-
 spec :: Spec
 spec = do
   describe "primitives" do
-    prop "genr is within range" $
-      \(runGen (genr 1 5) -> (x, _)) ->
-        collect x $
-          1 <= x && x < 5
-    prop "genri is within range" $
-      \(runGen (genr 1 5) -> (x, _)) ->
-        collect x $
-          1 <= x && x <= 5
+    describe "genr" do
+      prop "is within range" \(runGen (genr 1 5) -> (x, _)) ->
+        1 <= x && x < 5
+      it "covers" $ covers 4 (genr 1 5)
+      prop "l = r-1" \(runGen (genr 1 2) -> (x, _)) ->
+        x == 1
+
+    describe "genri" do
+      prop "is within range" \(runGen (genr 1 5) -> (x, _)) ->
+        1 <= x && x <= 5
+      it "covers" $ covers 5 (genri 1 5)
+      prop "l = r" \(runGen (genri 1 1) -> (x, _)) ->
+        x == 1
     describe "genrw" $ do
       prop "is within range" $
         \(runGen (genrw 1 5 2) -> (x, _)) ->
@@ -48,8 +53,8 @@ spec = do
           \(runGen (Cpmonad.Gen.choose xs) -> (x, _)) ->
             x `elem` xs
 
-    prop "genuntil" $
-      \(runGen (genuntil (<= 2) (genri 1 3)) -> (x, _)) ->
+    describe "genuntil" $
+      prop "is correct" \(runGen (genuntil (<= 2) (genri 1 3)) -> (x, _)) ->
         1 <= x && x <= 2
 
     describe "genpair" do
@@ -64,7 +69,6 @@ spec = do
        (runGen (distribute s n 0) -> (x, _)) ->
           counterexample ("x = " <> show x) $
             (V.length x === n) .&&. (V.sum x === s) .&&. V.minimum x >= 0
-
     prop "m > 0" $
       \(getNonNegative -> s')
        (getPositive -> n)
@@ -72,11 +76,6 @@ spec = do
        (runGen (distribute (s' + n * m) n m) -> (x, _)) ->
           counterexample ("x = " <> show x) $
             V.length x == n && V.sum x == (s' + n * m) && V.minimum x >= m
-
-  let covers :: (Eq a, Ord a) => Int -> Gen a -> Expectation
-      covers n gen = length (nubOrd . fst . runGen (replicateM nsafe gen) $ mkStdGen 1) `shouldBe` n
-       where
-        nsafe = (floor :: Double -> Int) $ fromIntegral n * (log (fromIntegral n) + 15.0)
 
   describe "shuffle" do
     prop "shuffles" $
