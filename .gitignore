@@ -22,6 +22,9 @@ cabal.project.local~
 .HTF/
 .ghc.environment.*
 
+\#*
+.\#*
+
 .direnv
 **/tmp
 **/tests

@@ -156,4 +156,3 @@ gendistinct n g = runGenST do
             VM.write v i x
             go (i + 1) (Set.insert x seen) v
   go 0 Set.empty v
-

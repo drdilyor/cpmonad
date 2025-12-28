@@ -48,12 +48,14 @@ module Cpmonad.Graph (
   linkGraphs,
   glueGraphs,
   vi,
-) where
+)
+where
 
 import Control.Arrow (Arrow ((&&&)))
 import Control.Monad
 import Control.Monad.ST
 import Control.Monad.Trans
+import Cpmonad.Gen
 import Data.Function
 import Data.Graph.Haggle
 import Data.Graph.Haggle.Classes (maxVertexId)
@@ -62,10 +64,8 @@ import Data.Set qualified as Set
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as VM
-import Unsafe.Coerce (unsafeCoerce)
 import Debug.Trace
-
-import Cpmonad.Gen
+import Unsafe.Coerce (unsafeCoerce)
 
 data GraphOptions = GraphOptions
   { connected :: Bool
@@ -114,15 +114,14 @@ gengraph GraphOptions{..} n m = runGenST do
           else (\case 0 -> (a, b); _ -> (b, a)) <$> liftg (genr 0 2)
       lift $ modifySTRef' resEdges $ Set.insert (vertexId a, vertexId b)
 
-  let
-    go resEdges | Set.size resEdges == m = pure resEdges
-    go resEdges = do
-      edge <- liftg $ liftA2 (,) (genr 0 n) (genr 0 n)
-      if
-        | not allowLoops && fst edge == snd edge -> go resEdges
-        | not allowMulti && Set.member edge resEdges -> go resEdges
-        | directed && not allowAntiparallel && Set.member (snd edge, fst edge) resEdges -> go resEdges
-        | otherwise -> go (Set.insert edge resEdges)
+  let go resEdges | Set.size resEdges == m = pure resEdges
+      go resEdges = do
+        edge <- liftg $ liftA2 (,) (genr 0 n) (genr 0 n)
+        if
+          | not allowLoops && fst edge == snd edge -> go resEdges
+          | not allowMulti && Set.member edge resEdges -> go resEdges
+          | directed && not allowAntiparallel && Set.member (snd edge, fst edge) resEdges -> go resEdges
+          | otherwise -> go (Set.insert edge resEdges)
 
   resEdges' <- go =<< lift (readSTRef resEdges)
   g <- newSizedMDigraph n m
@@ -147,17 +146,16 @@ treeFromPruferCode code = runST do
     di <- VM.read degree i
     when (di == 1) $ modifySTRef' leaves (Set.insert (vi i))
 
-  let
-    go i leaves
-      | i == n - 2 =
-          void $ addEdge g (Set.findMin leaves) (Set.findMax leaves)
-    go i (Set.minView -> Just (leaf, leaves)) = do
-      let v = code V.! i
-      void $ addEdge g leaf (vi v)
-      VM.modify degree (subtract 1) v
-      di <- VM.read degree v
-      go (i + 1) $ if di == 1 then Set.insert (vi v) leaves else leaves
-    go _ _ = error "infallible"
+  let go i leaves
+        | i == n - 2 =
+            void $ addEdge g (Set.findMin leaves) (Set.findMax leaves)
+      go i (Set.minView -> Just (leaf, leaves)) = do
+        let v = code V.! i
+        void $ addEdge g leaf (vi v)
+        VM.modify degree (subtract 1) v
+        di <- VM.read degree v
+        go (i + 1) $ if di == 1 then Set.insert (vi v) leaves else leaves
+      go _ _ = error "infallible"
   -- collect vertices with degree == 1
   leaves <- VM.ifoldl' (\cases s i 1 -> Set.insert (vi i) s; s _ _ -> s) Set.empty degree
   go 0 leaves
@@ -178,34 +176,32 @@ gentreeKruskal :: Int -> Gen SimpleBiDigraph
 gentreeKruskal n = runGenST do
   -- DSU
   parent <- V.thaw $ V.enumFromN (0 :: Int) n
-  let
-    connected a b = (==) <$> get a <*> get b
-    get i = do
-      p <- VM.read parent i
-      if p == i
-      then pure i
-      else do
-        ans <- get p
-        VM.write parent i ans
-        pure ans
-    connect a b = do
-      ar <- get a
-      br <- get b
-      VM.write parent ar br
+  let connected a b = (==) <$> get a <*> get b
+      get i = do
+        p <- VM.read parent i
+        if p == i
+          then pure i
+          else do
+            ans <- get p
+            VM.write parent i ans
+            pure ans
+      connect a b = do
+        ar <- get a
+        br <- get b
+        VM.write parent ar br
 
   g <- newSizedMSimpleBiDigraph n (n - 1)
   replicateM_ n $ addVertex g
-  replicateM_ (n - 1)  do
+  replicateM_ (n - 1) do
     traceShowM =<< V.freeze parent
-    let
-      go = do
-        (a, b) <- liftg $ genpair (/=) (genr 0 n)
-        isconn <- connected a b
-        if isconn
-        then go
-        else do
-          void $ addEdge g (vi a) (vi b)
-          connect a b
+    let go = do
+          (a, b) <- liftg $ genpair (/=) (genr 0 n)
+          isconn <- connected a b
+          if isconn
+            then go
+            else do
+              void $ addEdge g (vi a) (vi b)
+              connect a b
     go
   freeze g
 
@@ -230,7 +226,7 @@ gentreeCaterpillar :: Int -> Int -> Gen SimpleBiDigraph
 gentreeCaterpillar n l = runGenST do
   g <- thaw $ lineTree l
   replicateM_ (n - l) $ addVertex g
-  forM_ [l..n-1] \i -> do
+  forM_ [l .. n - 1] \i -> do
     p <- liftg $ genr 0 l
     addEdge g (vi p) (vi i)
   freeze g
@@ -242,7 +238,7 @@ karyTree :: Int -> Int -> SimpleBiDigraph
 karyTree k n = runST do
   g <- newSizedMSimpleBiDigraph n (n - 1)
   replicateM_ n $ addVertex g
-  forM_ [1..n-1] \i ->
+  forM_ [1 .. n - 1] \i ->
     addEdge g (vi $ (i - 1) `div` k) (vi i)
   freeze g
 
@@ -272,11 +268,10 @@ glueGraphs v1 g1 v2 g2 = runST do
   g <- thaw g1
   n <- countVertices g
   replicateM_ (maxVertexId g2 + 1 - 1) $ addVertex g
-  let
-    newVertex (vertexId -> x)
-      | x == v2 = vi v1
-      | x < v2 = vi $ n + x
-      | otherwise = vi $ n + x - 1
+  let newVertex (vertexId -> x)
+        | x == v2 = vi v1
+        | x < v2 = vi $ n + x
+        | otherwise = vi $ n + x - 1
   forM_ (edges g2) \(edgeSource &&& edgeDest -> (a, b)) ->
     addEdge g (newVertex a) (newVertex b)
   freeze g

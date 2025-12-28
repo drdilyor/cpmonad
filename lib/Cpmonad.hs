@@ -53,14 +53,22 @@ module Cpmonad (
   module Cpmonad.Graph,
   module Cpmonad.Printer,
   module Cpmonad.Misc,
-) where
+)
+where
 
+import Control.Applicative ((<|>))
+import Control.Concurrent
 import Control.DeepSeq
 import Control.Exception
 import Control.Monad
+import Cpmonad.Gen
+import Cpmonad.Graph
+import Cpmonad.Misc
+import Cpmonad.Printer
 import Data.ByteString.Builder qualified as B
 import Data.ByteString.Char8 qualified as B
 import Data.Default
+import Data.IORef
 import Data.List
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -76,16 +84,8 @@ import System.IO
 import System.IO.Error (isDoesNotExistError)
 import System.IO.Temp (withTempFile)
 import System.Process
-import System.Timeout (timeout)
-
-import Control.Applicative ((<|>))
-import Control.Concurrent
-import Cpmonad.Gen
-import Cpmonad.Graph
-import Cpmonad.Misc
-import Cpmonad.Printer
-import Data.IORef
 import System.Random (StdGen)
+import System.Timeout (timeout)
 
 {- | Central data specifying every part of the problem/task.
 
@@ -112,7 +112,7 @@ data Problem i a o where
        , printerA :: Printer (i, a)
        , printerO :: Printer (i, o)
        , timeLimit :: Int
-        -- ^ time limit in microseconds
+       -- ^ time limit in microseconds
        }
     -> Problem i a o
 

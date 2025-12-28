@@ -6,8 +6,8 @@ module Cpmonad.Misc where
 import Data.Default
 import Data.Vector (Vector)
 import Data.Vector qualified as V
-import Data.Vector.Strict qualified as VS
 import Data.Vector.Algorithms.Merge qualified as VA
+import Data.Vector.Strict qualified as VS
 
 -- Utility functions
 
