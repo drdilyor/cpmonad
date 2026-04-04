@@ -33,6 +33,7 @@ module Cpmonad.Graph (
   GraphOptions (..),
   connected,
   disconnected,
+  maxEdges,
   gengraph,
   gentree,
   gentreePrim,
@@ -47,6 +48,7 @@ module Cpmonad.Graph (
   shuffleGraph,
   linkGraphs,
   glueGraphs,
+  findCycle,
   vi,
 )
 where
@@ -64,7 +66,7 @@ import Data.Set qualified as Set
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as VM
-import Debug.Trace
+import Data.Word (Word8)
 import Unsafe.Coerce (unsafeCoerce)
 
 data GraphOptions = GraphOptions
@@ -88,28 +90,29 @@ disconnected =
     }
 
 connected :: GraphOptions
-connected = disconnected{connected = False}
+connected = disconnected{connected = True}
 
 vi :: Int -> Vertex
 vi = unsafeCoerce
 
+maxEdges :: GraphOptions -> Int -> Int
+maxEdges GraphOptions{..} n =
+  n * (n - 1)
+    & applyWhen (directed && allowAntiparallel) (`div` 2)
+    & applyWhen allowLoops (+ n)
+
 gengraph :: GraphOptions -> Int -> Int -> Gen Digraph
-gengraph GraphOptions{..} n m
+gengraph o@GraphOptions{..} n m
   | not connected && not directed && acyclic = error "gengraph doesn't have ability to generate forests!"
   | connected && m < n - 1 = error "not enough edges for a connected graph"
-  | not allowMulti && m > maxEdges = error "too many edges in the graph"
- where
-  maxEdges =
-    (n * (n - 1))
-      & applyWhen (directed && allowAntiparallel) (`div` 2)
-      & applyWhen allowLoops (+ n)
+  | not allowMulti && m > maxEdges o n = error "too many edges in the graph"
 gengraph GraphOptions{..} n m = runGenST do
   resEdges <- lift $ newSTRef Set.empty
   when connected do
     tree <- liftg $ gentree n
     forM_ (edges tree) \(edgeSource &&& edgeDest -> (a, b)) -> do
       (a, b) <-
-        if not directed
+        if directed
           then pure (a, b)
           else (\case 0 -> (a, b); _ -> (b, a)) <$> liftg (genr 0 2)
       lift $ modifySTRef' resEdges $ Set.insert (vertexId a, vertexId b)
@@ -118,7 +121,7 @@ gengraph GraphOptions{..} n m = runGenST do
       go resEdges = do
         edge <- liftg $ liftA2 (,) (genr 0 n) (genr 0 n)
         if
-          | not allowLoops && fst edge == snd edge -> go resEdges
+          | not allowLoops && uncurry (==) edge -> go resEdges
           | not allowMulti && Set.member edge resEdges -> go resEdges
           | directed && not allowAntiparallel && Set.member (snd edge, fst edge) resEdges -> go resEdges
           | otherwise -> go (Set.insert edge resEdges)
@@ -193,7 +196,6 @@ gentreeKruskal n = runGenST do
   g <- newSizedMSimpleBiDigraph n (n - 1)
   replicateM_ n $ addVertex g
   replicateM_ (n - 1) do
-    traceShowM =<< V.freeze parent
     let go = do
           (a, b) <- liftg $ genpair (/=) (genr 0 n)
           isconn <- connected a b
@@ -275,3 +277,23 @@ glueGraphs v1 g1 v2 g2 = runST do
   forM_ (edges g2) \(edgeSource &&& edgeDest -> (a, b)) ->
     addEdge g (newVertex a) (newVertex b)
   freeze g
+
+findCycle :: Digraph -> Maybe Vertex
+findCycle g' = runST do
+  g <- thaw g'
+  n <- countVertices g
+  color <- VM.replicate (n + 1) (0 :: Word8)
+  let go i = do
+        c <- VM.read color $ vertexId i
+        if
+          | c == 2 -> pure Nothing
+          | c == 1 -> pure $ Just i
+          | otherwise -> do
+              VM.write color (vertexId i) 1
+              res <-
+                getSuccessors g i >>= flip foldM (Nothing :: Maybe Vertex) \case
+                  Nothing -> go
+                  x -> const $ pure x
+              VM.write color (vertexId i) 2
+              pure res
+  go (vi 0)

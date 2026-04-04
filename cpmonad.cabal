@@ -119,6 +119,7 @@ test-suite test
     other-modules:
         Cpmonad.TestUtil
         Cpmonad.GenSpec
+        Cpmonad.GraphSpec
         Cpmonad.PrinterSpec
 
     build-depends:
@@ -127,5 +128,6 @@ test-suite test
         hspec-contrib,
         QuickCheck,
         HUnit,
+        multiset
 
     hs-source-dirs: test
