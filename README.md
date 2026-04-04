@@ -8,10 +8,11 @@ See an example problem [here](./scratchpad/app/Main.hs)
 - [x] Simplest generators
 - [x] Simple and fast printers
 - [x] Simplest way to run solutions
+- [x] Generators for trees and graphs
 
 # Todo
 
-- [ ] Generators for trees and graphs
+- [ ] More generators for graphs
 - [ ] Generators for math-related stuff
 - [ ] Better entry-point (have a cli, maybe rewrite to shake?)
 - [ ] Generators for geometry
