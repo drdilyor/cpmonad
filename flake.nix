@@ -23,6 +23,14 @@
             hpkgs.developPackage {
               root = ./.;
               inherit returnShellEnv;
+              overrides = self: super: {
+                mkDerivation = args: super.mkDerivation (args // {
+                  doCheck = false;
+                  doHaddock = false;
+                  enableLibraryProfiling = false;
+                  enableExecutableProfiling = false;
+                });
+              };
               modifier = pkgs.haskell.lib.compose.overrideCabal (old: {
                 buildTools =
                   (old.buildTools or [ ])
